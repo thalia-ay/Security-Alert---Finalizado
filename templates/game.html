@@ -16,7 +16,7 @@
            class="progress-phase {% if p < phase %}completed{% elif p == phase %}active{% endif %}"
            title="Ir para Fase {{ p }}">
             <span class="progress-icon">
-                {% if p == 1 %}🔑{% elif p == 2 %}⚠️{% elif p == 3 %}🎣{% elif p == 5 %}📱{% else %}📞{% endif %}
+                {% if p == 1 %}🔑{% elif p == 2 %}⚠️{% elif p == 3 %}🎣{% elif p == 4 %}📞{% elif p == 5 %}📱{% elif p == 6 %}🤖{% else %}📞{% endif %}
             </span>
             <span class="progress-label">Fase {{ p }}</span>
         </a>
@@ -76,7 +76,9 @@
                 <span class="subphase-num">{% if phase_data.classify %}Documento {{ sub }}/{{ total_subs_in_phase }}{% else %}Questao {{ sub }}/{{ total_subs_in_phase }}{% endif %}</span>
                 <span class="subphase-points">Vale 10 pontos</span>
             </div>
+            {% if phase != 6 %}
             <h2 class="subphase-title">{% if phase_data.classify %}Como você classifica este documento?{% else %}{{ subphase_data.title }}{% endif %}</h2>
+            {% endif %}
 
             {% if already_answered %}
             {# Ja respondeu - mostrar resultado e botao de continuar #}
@@ -330,6 +332,31 @@
                 </div>
             </div>
             {% else %}
+            {% if phase == 6 %}
+            {# ═══════ FASE 6: FERRAMENTA DE IA — chat IA (somente visual) ═══════ #}
+            <div class="ai-sim">
+                <div class="ai-header">🤖 Assistente IA</div>
+                <div class="ai-body">
+                    <div class="ai-input-box">
+                        <span class="ai-input-text">{{ subphase_data.question }}<span class="ai-cursor" aria-hidden="true"></span></span>
+                        <span class="ai-send-icon" aria-hidden="true" title="">
+                            <!-- ícone de envio apenas visual — não substitui os botões -->
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                        </span>
+                    </div>
+                </div>
+                <div class="ai-actions" id="options-list">
+                    {% for opt in subphase_data.options %}
+                    <button class="option-btn ai-option-btn" data-index="{{ loop.index0 }}" onclick="submitAnswer({{ loop.index0 }})">
+                        <span class="option-text">{{ opt }}</span>
+                    </button>
+                    {% endfor %}
+                </div>
+            </div>
+            {% else %}
             <p class="subphase-question">{{ subphase_data.question }}</p>
 
             {% if subphase_data.mode == 'sms_sim' %}
@@ -499,6 +526,7 @@
                 {% endfor %}
             </div>
             {% endif %}
+            {% endif %}{# fim else phase==6 #}
             {% endif %}{# fim if classify #}
 
             {# Area de feedback (escondida ate responder) #}

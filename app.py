@@ -724,6 +724,79 @@ GAME_PHASES = {
                 )
             }
         ]
+    },
+    6: {
+        "title": "Fase 6: Uso de IA — Compartilhamento indevido de informações",
+        "icon": "🤖",
+        "color": "#8ecae6",
+        "boss_name": "Chefe Carlos",
+        "explanation": (
+            "Ferramentas de IA são ótimas aliadas, mas exigem cuidado. Um prompt com dados pessoais ou "
+            "informações internas pode vazar dados sensíveis e violar a LGPD. Vou mostrar quatro prompts. "
+            "Decida se cada um pode ou não pode ser enviado para a IA."
+        ),
+        "subphases": [
+            {
+                "id": 1,
+                "title": "Prompt com dados pessoais",
+                "question": "Resuma o atendimento do cliente João. CPF: 123.456.789-00 e telefone: (11) 99999-9999.",
+                "options": ["Pode enviar", "Não pode enviar"],
+                "correct": 1,
+                "explanation_correct": (
+                    "Correto! Esse prompt não pode ser enviado, pois contém o nome, o CPF e o telefone de um cliente. "
+                    "Esses dados pessoais não devem ser compartilhados com uma ferramenta de IA sem autorização."
+                ),
+                "explanation_wrong": (
+                    "Incorreto! O prompt contém o nome, o CPF e o telefone do cliente. Compartilhar esses dados com "
+                    "uma ferramenta de IA pode expor informações pessoais e violar a LGPD."
+                )
+            },
+            {
+                "id": 2,
+                "title": "Mensagem genérica de agradecimento",
+                "question": "Crie uma mensagem agradecendo ao cliente pela compra.",
+                "options": ["Pode enviar", "Não pode enviar"],
+                "correct": 0,
+                "explanation_correct": (
+                    "Correto! Esse prompt pode ser enviado, pois solicita apenas uma mensagem genérica de agradecimento "
+                    "e não contém dados pessoais ou informações internas."
+                ),
+                "explanation_wrong": (
+                    "Incorreto! Esse prompt pode ser enviado, pois não apresenta dados pessoais, informações confidenciais "
+                    "ou informações internas da empresa."
+                )
+            },
+            {
+                "id": 3,
+                "title": "Relatório interno de metas",
+                "question": "Resuma este relatório interno com as metas de vendas da loja para o próximo mês.",
+                "options": ["Pode enviar", "Não pode enviar"],
+                "correct": 1,
+                "explanation_correct": (
+                    "Correto! Esse prompt não pode ser enviado, pois o relatório apresenta metas de vendas que são "
+                    "informações internas da empresa."
+                ),
+                "explanation_wrong": (
+                    "Incorreto! As metas de vendas são informações internas da empresa e não devem ser compartilhadas "
+                    "com uma ferramenta de IA sem autorização."
+                )
+            },
+            {
+                "id": 4,
+                "title": "Mensagem sobre prazo de entrega",
+                "question": "Crie uma mensagem educada informando que o prazo de entrega pode variar de acordo com a região.",
+                "options": ["Pode enviar", "Não pode enviar"],
+                "correct": 0,
+                "explanation_correct": (
+                    "Correto! Esse prompt pode ser enviado, pois solicita uma mensagem genérica sobre o prazo de entrega "
+                    "e não contém informações sensíveis."
+                ),
+                "explanation_wrong": (
+                    "Incorreto! Esse prompt pode ser enviado, pois não contém dados de clientes nem informações internas "
+                    "ou confidenciais da empresa."
+                )
+            }
+        ]
     }
 }
 
