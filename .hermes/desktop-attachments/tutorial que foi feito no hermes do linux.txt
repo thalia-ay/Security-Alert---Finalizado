@@ -1,0 +1,602 @@
+# Tutorial — Análise do Loader (Checkpoint 1 — O Pendrive Esquecido)
+
+Este tutorial mostra, passo a passo, como reproduzir toda a análise do
+`mshelp.exe` (loader) e extrair o payload protegido. Ele foi escrito para
+você montar o SEU relatório com as suas palavras — use os comandos abaixo,
+entenda o que cada um revela e escreva o relatório por conta própria
+(não copie/cole texto gerado aqui; a ideia é você conseguir reproduzir e
+explicar o processo).
+
+A diferença desta versão: em cada etapa, além do comando e da saída, tem um
+bloco "O QUE ISSO SIGNIFICA / POR QUE IMPORTA". É ali que está a explicação
+do motivo de cada coisa ser importante — é isso que você vai usar pra escrever
+o relatório com argumentos, não só com comandos.
+
+Tudo foi feito em Linux (não precisa de Windows nem de rodar o malware).
+Ferramentas usadas: file, sha256sum/md5sum, strings, objdump (binutils),
+Python 3 + pefile + capstone.
+
+---
+
+## 1. Reconhecimento inicial
+
+Entre na pasta onde estão os arquivos e veja o que existe:
+
+    cd "/home/investigator/Downloads/CP1_MALTHREAT_LOADER_2-2026 1/CP1_pass_infected"
+    ls -la
+
+Resultado esperado: dois arquivos
+
+    mshelp.exe          (765.105 bytes)  -> o loader
+    .jujutsukskdsa      (174.896 bytes)  -> o payload CIFRADO (arquivo oculto)
+
+O nome comecando com ponto (.) esconde o arquivo na listagem comum. Ele é o
+"segundo binario armazenado de maneira protegida" mencionado no enunciado.
+
+Tire os metadados do executavel:
+
+    file mshelp.exe
+    sha256sum mshelp.exe
+    md5sum    mshelp.exe
+    sha256sum .jujutsukskdsa
+
+Resultados:
+
+    mshelp.exe: PE32+ executable for MS Windows 4.00 (GUI), x86-64, 12 sections
+    mshelp.exe        sha256 = 2e0ecc68dc0b373d6360bd3b74b15bc3a367900628e5c1d333d23a484772cb24
+    mshelp.exe        md5    = 075ef984f6616377032efc534f27cb23
+    .jujutsukskdsa    sha256 = 8b7c603628fe7e5f7de0c06bde78075472e1d3fe5f9c3bda6965e569d3c666c5
+
+O `.jujutsukskdsa` nao comeca com "MZ" (o `file` diz "data") — ou seja, esta
+cifrado. O loader e um PE x86-64 normal.
+
+### O QUE ISSO SIGNIFICA / POR QUE IMPORTA
+
+- `ls -la`: o `-a` mostra arquivos ocultos. POR QUE IMPORTA: o payload está
+  escondido como arquivo oculto (o `.` no início do nome). Se você rodar só
+  `ls` normal, NÃO vê o payload — e perde metade do checkpoint. Primeira lição
+  de análise: sempre liste com `-a`, porque malware gosta de se esconder com
+  nomes começando em ponto.
+
+- `file`: diz o TIPO do arquivo, sem rodar nada. POR QUE IMPORTA: é a forma
+  mais segura e rápida de saber com o que você está lidando. "PE32+ executable
+  ... x86-64, 12 sections" = é um executável Windows de 64 bits. Isso já
+  delimita o campo: é um binário pra Windows, e a análise vai ser de engenharia
+  reversa de PE.
+
+- `sha256sum` / `md5sum`: calculam o HASH do arquivo. POR QUE IMPORTA: o hash é
+  a "impressão digital" única daquele arquivo. Ele NÃO diz o que o malware faz,
+  mas serve pra três coisas: (1) provar no relatório que você analisou
+  exatamente aquele arquivo e não outro; (2) procurar a amostra em bancos tipo
+  VirusTotal; (3) permitir que outra pessoa reproduza sua análise e confirme que
+  achou o mesmo resultado. É a identidade do arquivo.
+
+- `.jujutsukskdsa` não começa com "MZ" e o `file` diz "data". POR QUE IMPORTA:
+  TODO executável Windows válido começa com os bytes "MZ" (iniciais de Mark
+  Zbikowski, criador do formato DOS). Se o `file` não reconhece o formato e não
+  tem "MZ", uma de duas coisas: ou não é um PE, ou está CIFRADO/compactado. Como
+  o enunciado fala em "protegido", a conclusão é: está cifrado. Isso confirma
+  que existe um payload protegido dentro da amostra e define o objetivo da
+  análise — decifrar esse arquivo.
+
+---
+
+## 2. Identificando a "cara" do binario
+
+Dumpe as strings do loader:
+
+    strings -a -n 6 mshelp.exe | head -50
+
+Voce vai ver padroes de prologo/epilogo de funcao ("SWVATAUH", "SWVATH"),
+identificadores RTTI no estilo `$unwind$P$LOADER_$$_...` e `TC_$RC4_$$_...`,
+e a string de compilacao:
+
+    FPC 3.2.2 [2021/05/15] for x86_64 - Win64
+
+Conclusao: o binario foi compilado com **Free Pascal / Lazarus** (FPC 3.2.2).
+Isso explica as secoes com nomes numericos (/4, /19, /31, /45, /57) e o RTTI
+detalhado embutido — que e justamente o que facilita a analise.
+
+Confirme as secoes e o entry point com Python + pefile:
+
+    python3 - <<'EOF'
+    import pefile
+    pe = pefile.PE("mshelp.exe")
+    print("EntryPoint:", hex(pe.OPTIONAL_HEADER.AddressOfEntryPoint))
+    print("ImageBase:", hex(pe.OPTIONAL_HEADER.ImageBase))
+    print("TimeDateStamp:", hex(pe.FILE_HEADER.TimeDateStamp))
+    for s in pe.sections:
+        print(s.Name.rstrip(b'\0').decode(), hex(s.VirtualAddress), s.Misc_VirtualSize)
+    EOF
+
+Destaques:
+    EntryPoint RVA = 0x1700
+    ImageBase       = 0x100000000   (bem fora do padrao 0x400000)
+    TimeDateStamp   = 0x0           (zerado -> tipico de malware)
+
+### O QUE ISSO SIGNIFICA / POR QUE IMPORTA
+
+- `strings -a -n 6`: extrai sequências de texto legível que estão embutidas
+  dentro do binário. POR QUE IMPORTA: programas guardam mensagens de erro,
+  nomes de APIs, caminhos de arquivo e strings de compilação dentro do próprio
+  executável. Rodar `strings` é o jeito MAIS BARATO de ter uma primeira ideia
+  do que o binário faz, sem precisar disassemblar nada ainda. É sempre o
+  segundo passo de qualquer análise estática (depois do `file`/hash).
+
+- A string `FPC 3.2.2 ... for x86_64 - Win64`: identifica o COMPILADOR. POR QUE
+  IMPORTA: saber que é Free Pascal/Lazarus (não é C/C++ com Visual Studio, não
+  é .NET) muda tudo — o FPC embute RTTI e a tabela de símbolos no binário, o
+  que significa que mais pra frente a gente vai achar NOMES DE FUNÇÃO de graça.
+  Isso facilita demais a análise (e é o que torna o checkpoint possível de
+  resolver sem rodar o malware). Compilador identificado = você já sabe como o
+  binário é estruturado por dentro.
+
+- EntryPoint RVA 0x1700: é o endereço onde a execução COMEÇA. POR QUE IMPORTA:
+  é o ponto de partida de qualquer análise de disassembly — é dali que você
+  segue o fluxo do programa pra entender o que ele faz. Toda análise começa no
+  entry point.
+
+- ImageBase 0x100000000: é o endereço preferido onde o PE espera ser carregado
+  na memória. POR QUE IMPORTA: o valor padrão do Windows é 0x400000 (ou
+  0x140000000 pra x64 com MSVC). Um valor incomum tipo 0x100000000 é uma
+  configuração não-padrão do FPC — e vai voltar a aparecer na injeção (o loader
+  precisa realocar o payload se não conseguir carregar no endereço preferido).
+
+- TimeDateStamp 0x0: o campo que normalmente guarda a DATA DE COMPILAÇÃO está
+  zerado. POR QUE IMPORTA: compiladores normais gravam a data ali
+  automaticamente. Zerar esse campo é uma manobra típica de malware pra esconder
+  QUANDO foi compilado (dificulta atribuição e correlação). É uma evidência de
+  comportamento intencionalmente evasivo — bom de citar no relatório.
+
+---
+
+## 3. O que o loader faz (as strings entregam tudo)
+
+Filtre as strings relevantes:
+
+    strings -a -n 5 mshelp.exe | grep -iE "kernel32|ntdll|CreateProcess|Thread|VirtualAlloc|WriteProcess|NtUnmap|NtQuery|LoadLibrary|GetProcAddress|jujutsu|Payload|nslookup|RC4|notepad"
+
+Voce vai ver o fluxo completo do loader escrito em portugues:
+
+    .jujutsukskdsa
+    Arquivo cifrado nao encontrado:
+    Payload decifrado:
+    Payload muito pequeno
+    Nao e PE (MZ)
+    Nao e PE (PE)
+    Nao e PE32+ (64 bits). Magic=
+    C:\Windows\System32\nslookup.exe
+    CreateProcess falhou:
+    notepad criado PID=
+    GetThreadContext falhou:
+    Rip inicial=
+    NtQueryInformationProcess falhou:
+    PEB=
+    Leitura ImageBaseAddress falhou
+    notepad ImageBase(antigo)=
+    NtUnmapViewOfSection=
+    VirtualAllocEx no ImageBase falhou (
+    VirtualAllocEx falhou:
+    A mapeado em=
+    Write headers falhou:
+    Write sec falhou:
+    Escrita ImageBaseAddress falhou:
+    PEB.ImageBaseAddress atualizado=
+    SetThreadContext falhou:
+    SetThreadContext Rip=
+    ResumeThread executado (
+    Concluido.
+
+Isso ja desenha o comportamento: o programa le um arquivo cifrado, decifra,
+valida que e um PE de 64 bits, e injeta num processo `nslookup.exe` (as
+mensagens ainda dizem "notepad" porque o autor trocou o alvo de notepad para
+nslookup sem atualizar o texto de debug).
+
+Tambem aparecem os nomes da unit de cripto:
+
+    RC4KEY  RC4ENCRYPT  RC4DECRYPT  RC4CRYPT  KEYTOBYTES  KEYBYTES  ENCRYPTED  DECRYPTED
+
+Ou seja: **o algoritmo e RC4**.
+
+E os wrappers de API dinamica (resolvidos via GetProcAddress):
+
+    CreateProcessA  GetThreadContext  SetThreadContext  ResumeThread
+    VirtualAllocEx  WriteProcessMemory  ReadProcessMemory
+    LoadLibraryA  GetProcAddress  NtUnmapViewOfSection  NtQueryInformationProcess
+
+Isso e a assinatura classica de **process hollowing** (processo oco).
+
+### O QUE ISSO SIGNIFICA / POR QUE IMPORTA
+
+- Filtrar com `grep -iE ...`: pega só as strings que importam. POR QUE IMPORTA:
+  um binário tem centenas de strings; filtrar por nomes de API, caminhos e
+  palavras-chave é o que separa o ruído do sinal. É uma triagem.
+
+- As mensagens em português ("Arquivo cifrado nao encontrado", "Concluido."):
+  são o texto de DEBUG do autor. POR QUE IMPORTA: o próprio autor descreveu, em
+  cada etapa, o que o programa está fazendo. É praticamente um mapa de graça do
+  fluxo do malware — você lê as mensagens e já sabe a sequência de operações
+  sem ter disassemblado uma instrução sequer. Essa é a maior "sorte" da amostra
+  e vale destacar no relatório.
+
+- O detalhe "notepad" vs "nslookup": as mensagens falam "notepad" mas o caminho
+  é nslookup.exe. POR QUE IMPORTA: é um artefato de desenvolvimento — o autor
+  trocou o alvo da injeção de notepad pra nslookup mas esqueceu de atualizar as
+  mensagens. É um indício de que a ferramenta foi reaproveitada/adaptada, e
+  mostra que você leu a amostra com atenção (evidência de análise cuidadosa).
+
+- Os nomes `RC4KEY RC4ENCRYPT RC4DECRYPT RC4CRYPT KEYTOBYTES ...`: entregam o
+  ALGORITMO de criptografia. POR QUE IMPORTA: é a resposta direta à pergunta
+  "com que criptografia o payload foi protegido?" → RC4. Sem isso você teria que
+  adivinhar o algoritmo (existem dezenas). Com o nome na string, está
+  confirmado: é RC4, e o próximo passo é só achar a CHAVE.
+
+- A lista de APIs (CreateProcessA, GetThreadContext, NtUnmapViewOfSection,
+  WriteProcessMemory, ResumeThread, VirtualAllocEx ...): é a assinatura de
+  PROCESS HOLLOWING. POR QUE IMPORTA: cada API tem um papel específico na
+  técnica — CreateProcessA (criar processo suspenso), NtUnmapViewOfSection
+  (esvaziar a memória do processo), VirtualAllocEx (alocar espaço),
+  WriteProcessMemory (escrever o payload), GetThreadContext/SetThreadContext
+  (ler/ajustar o ponto de execução), ResumeThread (disparar). Reconhecer esse
+  CONJUNTO de APIs é o que permite dizer, com segurança: o loader usa process
+  hollowing. Você não precisa ver o código pra afirmar isso — a combinação de
+  APIs já entrega a técnica.
+
+---
+
+## 4. Recuperando a CHAVE (a parte mais importante)
+
+A chave RC4 nao aparece como string legivel. Ela esta num record do tipo
+`TRC4Key` + duas constantes de IV, armazenadas na secao `.data`.
+
+O binario do FPC tem a tabela de simbolos embutida. Use-a:
+
+    objdump -t mshelp.exe | grep -iE "RC4|main|PASCAL|RESOLVE|LOADER_\\$_Ld"
+
+Achados principais (os valores sao offsets DENTRO da secao indicada):
+
+    [sec 1] 0x740   P$LOADER_$$_RESOLVEAPIS
+    [sec 1] 0x1620  main / PASCALMAIN
+    [sec 1] 0x2df60 RC4_$$_RC4DECRYPT$TBYTES$TRC4KEY$LONGWORD$LONGWORD$$TBYTES
+    [sec 2] 0x1950  TC_$RC4_$$_RC4KEY
+    [sec 2] 0x1960  TC_$RC4_$$_RC4IV0
+    [sec 2] 0x1970  TC_$RC4_$$_RC4IV1
+
+Traduzindo para enderecos virtuais (a secao .data comeca em VA 0x100032000):
+
+    RC4KEY -> 0x100033950
+    RC4IV0 -> 0x100033960
+    RC4IV1 -> 0x100033970
+
+Leia esses bytes:
+
+    python3 - <<'EOF'
+    import pefile
+    pe = pefile.PE("mshelp.exe")
+    d = pe.get_memory_mapped_image()
+    for rva in (0x33950, 0x33960, 0x33970):
+        b = d[rva:rva+16]
+        print(hex(rva), b.hex())
+    EOF
+
+Resultado (a CHAVE do RC4):
+
+    RC4KEY  = 4c 1f b7 a3 61 8a 2d 9e 7b 3e c0 f5 2e 9a 64 d1   (16 bytes)
+    RC4IV0  = 9e a1 4f 7c                                         (4 bytes)
+    RC4IV1  = f5 d6 82 3b                                         (4 bytes)
+
+### Confirmando COMO a chave e usada (disassembly do main)
+
+Desassemble o `main` e veja a chamada a RC4DECRYPT:
+
+    objdump -d -M intel --start-address=0x1000027b0 --stop-address=0x100002820 mshelp.exe
+
+Trecho-chave:
+
+    mov  eax, DWORD PTR [rip+...]   # RC4IV1  (5o argumento, via pilha)
+    mov  r9d, DWORD PTR [rip+...]   # RC4IV0  (4o argumento)
+    lea  r8,  [rip+...]             # &RC4KEY (3o argumento, ponteiro p/ record)
+    mov  rdx, [rip+...]             # Data    (2o argumento, o arquivo lido)
+    lea  rcx, [rbp-0x28]            # out     (1o argumento, resultado)
+    call RC4DECRYPT
+
+A unit RC4 monta a chave final concatenando, na ordem:
+
+    chave_material (24 bytes) = RC4KEY(16) || RC4IV0(4) || RC4IV1(4)
+
+Desassemble a funcao que faz isso (0x10002ee60):
+
+    objdump -d -M intel --start-address=0x10002ee50 --stop-address=0x10002ef60 mshelp.exe
+
+Voce vera tres chamadas a `FPC_MOVE` copiando: 16 bytes da chave, 4 bytes do
+IV0 e 4 bytes do IV1, para um array de 24 bytes (`SetLength(..., 0x18)`).
+
+E desassemble o nucleo RC4 (0x10002ecc0):
+
+    objdump -d -M intel --start-address=0x10002ecb0 --stop-address=0x10002ee30 mshelp.exe
+
+Voce reconhecera o RC4 padrao:
+
+    KSA:  S[i] = i para i=0..255
+          j = (j + S[i] + chave[i mod len]) & 0xFF
+          swap(S[i], S[j])
+
+    PRGA: i = (i + 1) & 0xFF
+          j = (j + S[i]) & 0xFF
+          swap(S[i], S[j])
+          saida = S[(S[i] + S[j]) & 0xFF] ^ byte_do_dado
+
+### O QUE ISSO SIGNIFICA / POR QUE IMPORTA
+
+- `objdump -t` (tabela de símbolos): lista os NOMES de funções/constantes e
+  seus offsets. POR QUE IMPORTA: é aqui que o FPC "se entrega". A maioria dos
+  binários de malware é "stripped" (sem símbolos), e você penaria pra achar uma
+  chave de 16 bytes no meio de um binário de 765 KB. O FPC embutiu a tabela, e
+  nela aparecem `RC4KEY`, `RC4IV0`, `RC4IV1` com os endereços exatos. Ou seja:
+  a ferramenta te deu o mapa do tesouro com um X marcando o lugar da chave.
+
+- Ler os bytes em 0x33950/960/970: é o momento em que você extrai a CHAVE de
+  verdade. POR QUE IMPORTA: a chave é o coração da proteção. Sem ela, o arquivo
+  `.jujutsukskdsa` é só lixo cifrado — não vira PE, não vira nada. Com ela, você
+  consegue reverter a criptografia e recuperar o payload. É o ponto central de
+  todo o checkpoint.
+
+- Disassemblar o `main` e ver a chamada a RC4DECRYPT: confirma COMO a chave é
+  usada. POR QUE IMPORTA: ter a chave não basta. Você precisa saber a ORDEM dos
+  bytes. `RC4KEY+IV0+IV1` é diferente de `IV1+IV0+RC4KEY` — o RC4 é sensível à
+  ordem exata da chave. O disassembly prova, sem adivinhação, qual é a ordem
+  correta (e a ordem dos argumentos da função). Isso é o que diferencia "chutei"
+  de "confirmei por engenharia reversa".
+
+- As três chamadas a FPC_MOVE copiando 16+4+4 bytes: confirmam a montagem da
+  chave de 24 bytes. POR QUE IMPORTA: é a prova de baixo nível de que a chave
+  final é exatamente a concatenação naquela ordem. Você não está confiando só
+  nos nomes de símbolo — está vendo o código copiar os 24 bytes.
+
+- Reconhecer o RC4 padrão no disassembly (KSA + PRGA): POR QUE IMPORTA: é a
+  confirmação final de que é RC4 "de verdade", não uma variação. Ver o KSA (o
+  laço que monta a tabela S[256]) e o PRGA (o laço que gera o byte e faz XOR
+  com o dado) é o que te permite afirmar no relatório: "é RC4 padrão, e aqui
+  está a prova no disassembly".
+
+---
+
+## 5. Extraindo o payload
+
+O script `decrypt_payload.py` (ja deixado nesta pasta) implementa exatamente
+isso. Rode:
+
+    python3 decrypt_payload.py .jujutsukskdsa payload_descriptografado_funcional.bin
+
+Saida esperada:
+
+    OK: 174896 bytes escritos em payload_descriptografado_funcional.bin
+    Assinatura: b'MZ' (esperado b'MZ')
+
+Hash do payload extraido:
+
+    sha256 = c116b49ba8a2bdb0ee965193d44c5eacd72f6fa02797c44f1d8d50e82f3bbbe0
+
+Valide que e um PE:
+
+    file payload_descriptografado_funcional.bin
+    # -> PE32+ executable ... x86-64
+
+E analise-o:
+
+    python3 - <<'EOF'
+    import pefile
+    pe = pefile.PE("payload_descriptografado_funcional.bin")
+    print("EntryPoint:", hex(pe.OPTIONAL_HEADER.AddressOfEntryPoint))
+    print("ImageBase:", hex(pe.OPTIONAL_HEADER.ImageBase))
+    print("Seções:", pe.FILE_HEADER.NumberOfSections)
+    for e in pe.DIRECTORY_ENTRY_IMPORT:
+        print(e.dll.decode(), [i.name.decode() for i in e.imports if i.name])
+    EOF
+
+O payload tambem e um binario Free Pascal (mesmas 12 secoes, mesmo
+ImageBase 0x100000000). Os imports sao so o RTL (kernel32/oleaut32/user32):
+ExitProcess, WriteFile, CreateFileW, CreateThread, Sleep, MessageBoxA.
+
+Desassemble o main do payload:
+
+    objdump -t payload_descriptografado_funcional.bin | grep -iE "main|PASCAL|STEALER"
+
+Voce descobrira que o "programa" do payload se chama `STEALER_STUB` e o corpo
+do main e um loop infinito:
+
+    add ebx, 1
+    mov ecx, 0x3a98        ; 15000
+    call Sleep             ; Sleep(15000) = dorme 15 s
+    jmp loop
+
+Ou seja, o payload e um **esqueleto de "stealer"** que, neste checkpoint, so
+fica dormindo em loop. Ele nao rouba nada — e um placeholder para o professor
+demonstrar a cadeia loader -> payload.
+
+### O QUE ISSO SIGNIFICA / POR QUE IMPORTA
+
+- A saída `Assinatura: b'MZ'`: é a PROVA de que a decifragem funcionou. POR QUE
+  IMPORTA: antes o arquivo era "data" (lixo cifrado). Depois de rodar o script,
+  os dois primeiros bytes são "MZ" — a assinatura de todo PE válido. Se a chave
+  ou a ordem estivessem erradas, o resultado seria lixo aleatório, e o primeiro
+  byte NÃO seria "M". Essa única linha confirma, de forma objetiva, que você
+  recuperou a chave e o algoritmo corretamente.
+
+- `file` dizendo "PE32+ executable ... x86-64": confirma que o que saiu é um
+  executável Windows de 64 bits VÁLIDO. POR QUE IMPORTA: é a validação
+  independente — não é só o primeiro byte, é o formato inteiro reconhecido. Isso
+  encerra a parte de "recuperar o payload protegido" com prova.
+
+- Os imports do payload (só RTL: ExitProcess, WriteFile, MessageBox, Sleep...):
+  POR QUE IMPORTA: imports dizem o que um binário é CAPAZ de fazer — quais
+  funções do sistema ele chama. Um stealer de verdade importaria funções de
+  captura de credenciais, rede, etc. Este só importa coisas básicas de runtime
+  (escrever arquivo, dormir, mostrar caixa de mensagem). Conclusão: ele não tem
+  capacidade de roubar nada ainda. Isso dimensiona a ameaça real da amostra.
+
+- `STEALER_STUB` + loop `Sleep(15000)` infinito: POR QUE IMPORTA: o nome do
+  programa e o corpo do main (só dorme 15s e repete) provam que este payload é
+  um ESQUELETO (stub), não um stealer funcional. É o "placeholder" pedagógico:
+  o professor demonstra a CADEIA loader→payload (o loader decifra e injeta; o
+  payload só marca presença). No relatório, isso mostra que você entendeu que o
+  perigo aqui é o MECANISMO de entrega (hollowing), não o payload em si.
+
+---
+
+## 6. Entendendo a injecao (process hollowing)
+
+Desassemble o `main` do loader por inteiro e a funcao RESOLVEAPIS:
+
+    objdump -d -M intel --start-address=0x100001740 --stop-address=0x1000018c0 mshelp.exe
+
+A `RESOLVEAPIS` resolve dinamicamente (GetModuleHandleA + GetProcAddress):
+
+    kernel32: CreateProcessA, GetThreadContext, SetThreadContext, ResumeThread,
+              VirtualAllocEx, WriteProcessMemory, ReadProcessMemory,
+              LoadLibraryA, GetLastError, GetProcAddress
+    ntdll:    NtUnmapViewOfSection, NtQueryInformationProcess
+
+O fluxo do `main`, reconstruido (bate com as strings da secao 3):
+
+    1. path := ExtractFilePath(ParamStr(0)) + ".jujutsukskdsa"
+    2. abre o arquivo (TFileStream) e le tudo para um TBytes
+    3. se tamanho <= 0 -> "Payload muito pequeno"
+    4. payload := RC4DECRYPT(dado, RC4KEY, RC4IV0, RC4IV1)
+    5. valida: "MZ" -> "PE" -> Magic == 0x20B (PE32+)
+    6. CreateProcessA("C:\\Windows\\System32\\nslookup.exe", CREATE_SUSPENDED)
+    7. GetThreadContext (captura RIP/RSP do processo suspenso)
+    8. NtQueryInformationProcess (pega o PEB -> ImageBaseAddress)
+    9. NtUnmapViewOfSection (desmapeia a imagem original do nslookup)
+   10. VirtualAllocEx no ImageBase do payload (tenta o endereco preferido;
+       se falhar, tenta em qualquer lugar e usa as relocacoes)
+   11. WriteProcessMemory: escreve os headers PE e depois cada secao
+   12. RESOLVEIMPORTS64 + APPLYRELOCATIONS64 (resolve IAT e aplica relocs
+       na imagem injetada)
+   13. WriteProcessMemory: atualiza PEB.ImageBaseAddress para o novo endereco
+   14. SetThreadContext (RIP := entry point do payload)
+   15. ResumeThread -> o payload executa dentro do nslookup.exe
+
+Essas funcoes estao na unit LOADER (simbolos confirmam):
+
+    P$LOADER_$$_RESOLVEAPIS
+    P$LOADER_$$_RVATOOFFSET
+    P$LOADER_$$_RESOLVEIMPORTS64
+    P$LOADER_$$_APPLYRELOCATIONS64
+    P$LOADER_$$_W_CREATEPROCESSA / W_GETTHREADCONTEXT / W_SETTHREADCONTEXT /
+      W_RESUMETHREAD / W_VIRTUALALLOCEX / W_WRITEPROCESSMEMORY /
+      W_READPROCESSMEMORY / W_NTUNMAPVIEWOFSECTION / W_NTQUERYINFORMATIONPROCESS
+
+### O QUE ISSO SIGNIFICA / POR QUE IMPORTA
+
+- RESOLVEAPIS resolvendo APIs via GetModuleHandleA + GetProcAddress: POR QUE
+  IMPORTA: um programa "normal" importa suas APIs direto na tabela de imports
+  (fica visível pra qualquer analisador). Resolver as APIs EM TEMPO DE EXECUÇÃO
+  (GetProcAddress) é uma técnica pra esconder quais funções o malware usa — a
+  tabela de imports fica limpa. É anti-análise. MAS aqui o autor deixou os nomes
+  das APIs como strings (você já viu na seção 3), então a gente pega a lista de
+  graça mesmo assim. Vale citar essa ironia no relatório.
+
+- O fluxo de 15 passos: é o coração do PROCESS HOLLOWING. POR QUE IMPORTA: cada
+  passo tem um papel — criar o processo suspenso (6) pra ele não rodar ainda;
+  esvaziar a memória original (9) pra não sobrar nada do nslookup; escrever o
+  payload no lugar (10-11); consertar os endereços da imagem injetada
+  (12-13, porque o payload raramente carrega no endereço preferido); e apontar a
+  execução pro payload e disparar (14-15). A "mágica" da técnica é esta: o
+  malware NUNCA grava o payload no disco — ele carrega direto na memória de um
+  processo legítimo (nslookup.exe), então quem olhar a lista de processos vê um
+  nslookup inocente, não vê o malware.
+
+- Por que isso importa pra DEFESA (e pro relatório): process hollowing é uma
+  técnica de evasão — o payload roda escondido dentro de um processo assinado e
+  legítimo do Windows. Entender cada passo é o que permite a um analista de
+  defesa detectar o comportamento (ex: um nslookup.exe que não deveria estar
+  rodando, ou um processo cuja imagem na memória não bate com o arquivo no
+  disco). É o ponto de maior valor didático do checkpoint.
+
+- Os nomes na unit LOADER (RESOLVEIMPORTS64, APPLYRELOCATIONS64, etc.):
+  POR QUE IMPORTA: confirmam, de novo via tabela de símbolos, que o loader
+  implementa as duas etapas mais "técnicas" da injeção — resolver os imports do
+  payload (pra ele achar as funções do sistema) e aplicar relocações (pra ele
+  rodar em qualquer endereço de memória). São detalhes que mostram que o loader
+  é funcional e completo, não um protótipo quebrado.
+
+---
+
+## 7. Resumo das evidências (para citar no relatorio)
+
+    - Arquivo:      mshelp.exe  (loader PE32+ x86-64, FPC 3.2.2)
+    - Payload:      .jujutsukskdsa  (174.896 bytes, cifrado)
+    - Algoritmo:    RC4 padrao (KSA + PRGA), implementacao propria (unit RC4)
+    - Chave final:  24 bytes = RC4KEY(16) + RC4IV0(4) + RC4IV1(4)
+    - RC4KEY:       4C1FB7A3618A2D9E7B3EC0F52E9A64D1  (VA 0x100033950)
+    - RC4IV0:       9EA14F7C                          (VA 0x100033960)
+    - RC4IV1:       F5D6823B                          (VA 0x100033970)
+    - Tecnica:      process hollowing sobre nslookup.exe
+    - Payload:      PE "STEALER_STUB" (loop Sleep(15000)), x86-64,
+                    EntryPoint 0x1570, ImageBase 0x100000000
+    - Hash payload: sha256 c116b49ba8a2bdb0ee965193d44c5eacd72f6fa02797c44f1d8d50e82f3bbbe0
+
+Funcoes/enderecos uteis (VA):
+
+    PASCALMAIN (main)                      0x100002620
+    RESOLVEAPIS                            0x100001740
+    RC4DECRYPT                             0x10002ef60
+    RC4CRYPT (nucleo RC4)                  0x10002ecc0
+    monta chave (KeyToBytes)               0x10002ee60
+    W_CREATEPROCESSA                       0x100002170
+    W_GETTHREADCONTEXT                     0x100002220
+    RC4KEY / RC4IV0 / RC4IV1 (.data)       0x100033950 / 960 / 970
+
+### O QUE ISSO SIGNIFICA / POR QUE IMPORTA
+
+- Esta tabela é o seu "gabarito de evidências". POR QUE IMPORTA: cada linha
+  associa uma CONCLUSÃO (algoritmo, chave, técnica) a uma EVIDÊNCIA OBJETIVA
+  (string, offset, endereço, hash). Num relatório de análise, conclusão sem
+  evidência é opinião; conclusão COM evidência (byte, offset, hash) é fato
+  reproduzível. É exatamente isso que o professor quer ver.
+
+---
+
+## 8. Checklist da entrega
+
+    1. report.pdf  -> escreva VOCE, com suas palavras. Use as evidencias acima
+       (strings, offsets, disassembly, chave, algoritmo, fluxo de injecao).
+    2. payload_descriptografado_funcional.bin  -> gerado pelo script (ja esta
+       nesta pasta, hash confirmado acima).
+    3. Empacote:  CÓDIGOTURMA_SEUNOME_RA_.zip  contendo os dois arquivos.
+    4. Senha do zip (se usar): infected
+    5. Suba no limewire.com (expirar em 3 dias ou 1 semana) e envie o link
+       pelo formulario.
+
+---
+
+## 9. Dica de como escrever o relatorio sem "copiar da LLM"
+
+Explique cada etapa com suas palavras e cite a evidencia objetiva (string,
+offset, byte). Uma estrutura que costuma funcionar:
+
+    1. Introducao / contexto
+    2. Analise estatica inicial (metadados, hashes, strings, secoes)
+    3. Localizacao do payload protegido (arquivo .jujutsukskdsa)
+    4. Algoritmo de cifra e recuperacao da chave (RC4 + IVs)
+    5. Reconstrucao do processo de decifragem (o que o codigo faz, passo a passo)
+    6. Extraicao e validacao do payload (PE valido)
+    7. Mecanismo de carga em memoria (process hollowing, passo a passo)
+    8. Analise do payload extraido (STEALER_STUB)
+    9. Conclusao e aprendizados
+   10. Anexos: tabela de offsets/evidencias
+
+Cada item acima esta coberto por comandos e evidencias neste tutorial.
+
+---
+
+## Resumo de bolso (o "por que" de tudo em 6 frases)
+
+1. Hash e `file` = identidade e tipo do arquivo (prova do que você analisou).
+2. `strings` + compilador = o binário se entrega sozinho (FPC embute símbolos).
+3. As mensagens em português = o autor descreveu o próprio fluxo.
+4. A chave RC4 = o que destrava o payload cifrado (é o objetivo central).
+5. O disassembly = prova de COMO a chave é usada e de que é RC4 padrão.
+6. O conjunto de APIs + fluxo de 15 passos = prova de que a técnica é process
+   hollowing.

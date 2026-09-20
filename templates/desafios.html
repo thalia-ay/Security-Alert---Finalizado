@@ -1,7 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Escolher Personagem - Security Alert{% endblock %}
+{% block title %}Mais Desafios - Security Alert{% endblock %}
 
-{# Wallpaper galeria/spotlight (decorativo, nao mexe no conteudo) - tema "museu" #}
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/wallpaper.css') }}">
 {% endblock %}
@@ -14,7 +13,6 @@
     <div class="wp-blob wp-blob-1"></div>
     <div class="wp-blob wp-blob-2"></div>
 
-    {# Terminal window decorativa (canto superior esquerdo) #}
     <div class="wp-terminal">
         <div class="wp-term-head"><span></span><span></span><span></span></div>
         &gt; sys.status<span class="cursor">_</span><br>
@@ -22,7 +20,6 @@
         &gt; net.up
     </div>
 
-    {# Gauge circular (canto superior direito) #}
     <svg class="wp-gauge" viewBox="0 0 110 110" xmlns="http://www.w3.org/2000/svg">
         <circle cx="55" cy="55" r="44" fill="none" stroke="rgba(168,213,186,.18)" stroke-width="3"/>
         <circle cx="55" cy="55" r="44" fill="none" stroke="rgba(242,157,191,.55)" stroke-width="3"
@@ -31,7 +28,6 @@
         <text x="55" y="58" text-anchor="middle" fill="rgba(242,157,191,.7)" font-family="JetBrains Mono" font-size="14" font-weight="700">75%</text>
     </svg>
 
-    {# Eixo de grafico sutil (linhas horizontais de fundo) #}
     <svg class="wp-axis" viewBox="0 0 100 60" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
         <g stroke="rgba(168,213,186,.18)" stroke-width="0.3">
             <line x1="0" y1="10" x2="100" y2="10" stroke-dasharray="1 3"/>
@@ -42,32 +38,23 @@
         </g>
     </svg>
 
-    {# Ticks laterais esquerda (escala HUD) #}
     <div class="wp-ticks">
         <span>100</span><span>075</span><span>050</span><span>025</span><span>000</span>
     </div>
 
-    {# Mini grafico de barras (canto inferior direito) #}
     <div class="wp-bars">
         <span></span><span></span><span></span><span></span>
         <span></span><span></span><span></span><span></span>
     </div>
 
-    {# Barra de progresso animada (rodape) #}
     <div class="wp-progress"></div>
 
-    {# Pips de status #}
-    <div class="wp-pip p1">SECURE_LINK</div>
     <div class="wp-pip p2">SYNC_OK</div>
 
-    {# Numeros hex flutuantes (sensores) #}
     <div class="wp-float-num">SYS // 0x4F2A</div>
     <div class="wp-float-num">UPTIME 99.7%</div>
     <div class="wp-float-num">DATA_RATE 2.4GB/s</div>
 
-    {# === NOVAS CAMADAS === #}
-
-    {# Mini sparkline (linha ondulada) - topo centro #}
     <svg class="wp-spark" viewBox="0 0 220 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
         <polyline fill="none" stroke="rgba(168,213,186,.6)" stroke-width="1.2"
                   points="0,28 18,22 36,26 54,14 72,20 90,10 108,18 126,8 144,16 162,6 180,14 198,4 220,12"/>
@@ -75,7 +62,6 @@
                   points="0,32 18,28 36,30 54,24 72,28 90,22 108,26 126,20 144,24 162,18 180,22 198,16 220,20"/>
     </svg>
 
-    {# Donut chart (canto inferior esquerdo) #}
     <svg class="wp-donut" viewBox="0 0 90 90" xmlns="http://www.w3.org/2000/svg">
         <circle cx="45" cy="45" r="36" fill="none" stroke="rgba(168,213,186,.18)" stroke-width="6"/>
         <circle cx="45" cy="45" r="36" fill="none" stroke="rgba(242,157,191,.65)" stroke-width="6"
@@ -83,13 +69,11 @@
         <text x="45" y="48" text-anchor="middle" fill="rgba(168,213,186,.7)" font-family="JetBrains Mono" font-size="11" font-weight="700">75%</text>
     </svg>
 
-    {# 4 pings pulsantes (rastreamento) #}
     <span class="wp-ping p1"></span>
     <span class="wp-ping p2"></span>
     <span class="wp-ping p3"></span>
     <span class="wp-ping p4"></span>
 
-    {# Crosshair (mira girando) no centro #}
     <svg class="wp-crosshair" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
         <g stroke="rgba(168,213,186,.5)" stroke-width="1" fill="none">
             <circle cx="30" cy="30" r="22"/>
@@ -102,7 +86,6 @@
         <circle cx="30" cy="30" r="2" fill="rgba(242,157,191,.7)"/>
     </svg>
 
-    {# Grid numerico canto inferior #}
     <div class="wp-grid-num">
         <span>01</span><span>02</span><span>03</span><span>04</span>
         <span>05</span><span>06</span><span>07</span><span>08</span>
@@ -110,11 +93,9 @@
         <span>13</span><span>14</span><span>15</span><span>16</span>
     </div>
 
-    {# Coordenadas GPS nos cantos #}
     <div class="wp-coord tl">LAT -23.5505 / LON -46.6333</div>
     <div class="wp-coord br">NODE.04 / SECTOR-B / 0x7E</div>
 
-    {# Mini line chart canto inferior direito (sobre as barras) #}
     <svg class="wp-line-chart" viewBox="0 0 180 50" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
         <polyline fill="none" stroke="rgba(242,157,191,.7)" stroke-width="1.5"
                   points="0,40 20,32 40,36 60,22 80,28 100,14 120,20 140,8 160,16 180,4"/>
@@ -124,7 +105,6 @@
         </g>
     </svg>
 
-    {# Status stack (lateral esquerda) #}
     <div class="wp-status-stack">
         <span>SYS_OK</span>
         <span>NET_UP</span>
@@ -132,84 +112,52 @@
         <span>FIREWALL</span>
     </div>
 
-    {# Contador regressivo (lateral direita) #}
     <div class="wp-countdown">
         <div class="cd-label">NEXT_SCAN</div>
         <div class="cd-value">00:42:18</div>
     </div>
 </div>
 
-<div class="char-page">
-    <div class="char-header">
-        <h1>🎮 Escolha seu Personagem para iniciar as fases</h1>
-        <p>Ele vai te acompanhar no canto da tela durante todas as fases do treinamento.</p>
+<div class="desafios-page">
+    <div class="desafios-header">
+        <h1>Mais Desafios</h1>
+        <p>Modulos extras para voce aprofundar seus conhecimentos em seguranca cibernetica.</p>
     </div>
 
-    <div class="char-grid">
-        {% for key, char in characters.items() %}
-        <form method="POST" action="{{ url_for('personagem') }}"
-              class="char-card {% if key == current %}selected{% endif %}">
-            <input type="hidden" name="character" value="{{ key }}">
-            <button type="submit" class="char-btn">
-                <span class="char-sprite-wrap">
-                    <img src="{{ url_for('static', filename=char.sprite) }}"
-                         alt="{{ char.name }}" class="char-sprite" id="sprite-{{ key }}">
-                </span>
-                <span class="char-name">{{ char.name }}</span>
-                <span class="char-tag">
-                    {% if key == current %}⭐ Selecionado{% else %}Selecionar{% endif %}
-                </span>
+    <div class="modulos-list">
+        {% for modulo in modulos %}
+        <div class="modulo-card">
+            <button class="modulo-header" type="button" aria-expanded="false" aria-controls="modulo-{{ loop.index }}">
+                <span class="modulo-icon">📁</span>
+                <span class="modulo-titulo">{{ modulo.titulo }}</span>
+                <span class="modulo-toggle">+</span>
             </button>
-        </form>
+            <div class="modulo-body" id="modulo-{{ loop.index }}" hidden>
+                <ul class="atividades-list">
+                    {% for atividade in modulo.atividades %}
+                    <li class="atividade-item">
+                        <span class="atividade-bullet">🔧</span>
+                        <a href="{{ atividade.url }}" class="atividade-link">{{ atividade.titulo }}</a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
         {% endfor %}
     </div>
-
-    <div class="char-back">
-        <a href="{{ url_for('dashboard') }}" class="btn btn-outline">📊 Voltar ao Dashboard</a>
-        <a href="{{ url_for('game_start') }}" class="btn btn-success">▶ Jogar com este personagem</a>
-    </div>
 </div>
-{% endblock %}
 
-{% block extra_js %}
 <script>
-// ===== GIRO DOS PERSONAGENS (frames de rotacao em sequencia) =====
-const SPIN_FRAMES = {{ spin_frames|tojson }};
-
-document.querySelectorAll('.char-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-        document.querySelectorAll('.char-card').forEach(c => c.classList.remove('picked'));
-        btn.closest('.char-card').classList.add('picked');
-    });
-});
-
-(function () {
-    Object.keys(SPIN_FRAMES).forEach(function (key) {
-        const img = document.getElementById('sprite-' + key);
-        if (!img) return;
-        const frames = SPIN_FRAMES[key] || [];
-        // Precisa de ao menos 2 frames para girar
-        if (frames.length < 2) return;
-
-        let loaded = 0, started = false;
-        frames.forEach(function (src) {
-            const im = new Image();
-            im.onload = im.onerror = function () {
-                loaded++;
-                if (!started && loaded >= frames.length) { started = true; spin(); }
-            };
-            im.src = src;
+(function() {
+    var headers = document.querySelectorAll('.modulo-header');
+    headers.forEach(function(h) {
+        h.addEventListener('click', function() {
+            var body = document.getElementById(h.getAttribute('aria-controls'));
+            var expanded = h.getAttribute('aria-expanded') === 'true';
+            h.setAttribute('aria-expanded', !expanded);
+            body.hidden = expanded;
+            h.querySelector('.modulo-toggle').textContent = expanded ? '+' : '-';
         });
-
-        function spin() {
-            let i = 0;
-            (function step() {
-                img.src = frames[i];
-                const delay = (i === 0) ? 1200 : 150;  // pausa maior de frente
-                i = (i + 1) % frames.length;
-                setTimeout(step, delay);
-            })();
-        }
     });
 })();
 </script>
