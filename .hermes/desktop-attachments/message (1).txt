@@ -1,0 +1,900 @@
+2. Identifique os arquivos
+
+Execute:
+
+file mshelp.exe
+file .jujutsukskdsa
+
+Para o mshelp.exe, o resultado deve ser semelhante a:
+
+PE32+ executable for MS Windows 4.00 (GUI), x86-64, 12 sections
+
+Isso nos diz que ele é:
+
+executável Windows;
+formato PE;
+64 bits;
+arquitetura x86-64.
+
+Já:
+
+file .jujutsukskdsa
+
+retorna apenas algo semelhante a:
+
+data
+
+Isso é interessante porque o segundo arquivo não é reconhecido inicialmente como executável.
+
+Nesse momento você ainda não afirma que ele é criptografado. Apenas registra:
+
+O arquivo .jujutsukskdsa não apresenta uma estrutura PE identificável em seu estado original.
+
+3. Calcule os hashes
+
+Use SHA-256:
+
+sha256sum mshelp.exe
+sha256sum .jujutsukskdsa
+
+No seu caso:
+
+mshelp.exe
+2e0ecc68dc0b373d6360bd3b74b15bc3a367900628e5c1d333d23a484772cb24
+
+e:
+
+.jujutsukskdsa
+8b7c603628fe7e5f7de0c06bde78075472e1d3fe5f9c3bda6965e569d3c666c5
+
+No relatório, isso entra como identificação das evidências.
+
+4. Procure strings no loader
+
+Primeiro:
+
+strings -a mshelp.exe | less
+
+Como existem muitas strings, eu filtrei termos interessantes:
+
+strings -a mshelp.exe | grep -Ei "RC4|CreateProcess|VirtualAlloc|WriteProcess|Thread|NtUnmap|NtQuery|notepad|PEB|ImageBase"
+
+Foi aqui que começaram a aparecer pistas muito fortes.
+
+Por exemplo:
+
+CreateProcessA
+GetThreadContext
+SetThreadContext
+ResumeThread
+VirtualAllocEx
+WriteProcessMemory
+ReadProcessMemory
+NtUnmapViewOfSection
+NtQueryInformationProcess
+
+Além disso:
+
+.jujutsukskdsa
+
+e:
+
+notepad criado PID=
+PEB=
+notepad ImageBase(antigo)=
+NtUnmapViewOfSection=
+VirtualAllocEx no ImageBase falhou
+PEB.ImageBaseAddress atualizado=
+SetThreadContext Rip=
+ResumeThread executado
+
+Essas strings são extremamente importantes.
+
+5. Primeira conclusão: .jujutsukskdsa está relacionado ao loader
+
+O fato de a string:
+
+.jujutsukskdsa
+
+estar dentro do mshelp.exe mostra que o programa conhece explicitamente esse nome.
+
+Isso já é uma evidência de que o loader provavelmente abre esse segundo arquivo.
+
+Você pode registrar no relatório:
+
+Durante a análise de strings do loader foi encontrada referência explícita ao arquivo .jujutsukskdsa, indicando que o executável interage diretamente com o segundo artefato.
+
+6. Procure pelo mecanismo de proteção
+
+Faça:
+
+strings -a mshelp.exe | grep -i rc4
+
+No seu arquivo aparecem:
+
+RC4KEY
+RC4IV0
+RC4IV1
+RC4ENCRYPT
+RC4DECRYPT
+RC4CRYPT
+TRC4KEY
+
+E inclusive um símbolo muito explícito:
+
+RC4_$$_RC4DECRYPT$TBYTES$TRC4KEY$LONGWORD$LONGWORD$$TBYTES
+
+Isso foi a principal pista de que o segundo arquivo utiliza RC4.
+
+Não foi simplesmente porque o conteúdo "parecia criptografado". O próprio loader possui funções RC4 identificáveis.
+
+7. Localize os símbolos RC4
+
+No Kali você pode usar:
+
+objdump -t mshelp.exe | grep RC4
+
+ou:
+
+nm -a mshelp.exe | grep RC4
+
+No seu executável aparecem, entre outros:
+
+TC_$RC4_$$_RC4KEY
+TC_$RC4_$$_RC4IV0
+TC_$RC4_$$_RC4IV1
+
+O nm mostra:
+
+0000000100033950 D TC_$RC4_$$_RC4KEY
+0000000100033960 D TC_$RC4_$$_RC4IV0
+0000000100033970 D TC_$RC4_$$_RC4IV1
+
+Isso é ótimo porque agora sabemos onde as constantes estão na memória.
+
+8. Entenda o endereço
+
+O executável possui ImageBase:
+
+0x100000000
+
+Por exemplo, a chave está em:
+
+0x100033950
+
+Removendo o ImageBase:
+
+0x100033950 - 0x100000000
+
+temos RVA:
+
+0x33950
+
+Agora precisamos descobrir em qual seção esse endereço se encontra.
+
+9. Veja as seções do PE
+
+Execute:
+
+objdump -h mshelp.exe
+
+No seu caso existe:
+
+Idx Name    Size       VMA                File off
+1   .data   000025e4   0000000100032000   00030c00
+
+Portanto:
+
+.data começa virtualmente em:
+0x100032000
+
+e fisicamente no arquivo em:
+
+0x30c00
+
+A chave está em:
+
+0x100033950
+
+Diferença:
+
+0x100033950
+-
+0x100032000
+=
+0x1950
+
+Então o offset físico é:
+
+0x30c00 + 0x1950
+
+resultado:
+
+0x32550
+
+Esse é o ponto do arquivo onde a chave está armazenada.
+
+10. Extraia os bytes da chave
+
+Se tiver xxd:
+
+xxd -g 1 -s 0x32550 -l 64 mshelp.exe
+
+Se não tiver, use:
+
+od -Ax -tx1 -N64 -j $((0x32550)) mshelp.exe
+
+No seu arquivo aparece:
+
+032550 4c 1f b7 a3 61 8a 2d 9e 7b 3e c0 f5 2e 9a 64 d1
+032560 9e a1 4f 7c 00 00 00 00 00 00 00 00 00 00 00 00
+032570 f5 d6 82 3b 00 00 00 00 00 00 00 00 00 00 00 00
+
+Daí conseguimos separar:
+
+RC4KEY
+
+Os primeiros 16 bytes:
+
+4c 1f b7 a3 61 8a 2d 9e 7b 3e c0 f5 2e 9a 64 d1
+
+Sem espaços:
+
+4c1fb7a3618a2d9e7b3ec0f52e9a64d1
+RC4IV0
+
+Os próximos 4:
+
+9e a1 4f 7c
+
+ou:
+
+9ea14f7c
+RC4IV1
+
+Depois:
+
+f5 d6 82 3b
+
+ou:
+
+f5d6823b
+11. Descubra como a chave final é formada
+
+A partir da rotina do loader, a chave utilizada pelo RC4 fica composta por:
+
+RC4KEY + RC4IV0 + RC4IV1
+
+Portanto:
+
+4c1fb7a3618a2d9e7b3ec0f52e9a64d1
++
+9ea14f7c
++
+f5d6823b
+
+Resultado:
+
+4c1fb7a3618a2d9e7b3ec0f52e9a64d19ea14f7cf5d6823b
+
+São:
+
+16 + 4 + 4 = 24 bytes
+
+de chave utilizada pela implementação.
+
+12. Faça a descriptografia em Python
+
+Agora você pode reproduzir o algoritmo.
+
+Crie:
+
+nano decrypt.py
+
+Cole:
+
+from pathlib import Path
+
+
+def rc4(data, key):
+    S = list(range(256))
+    j = 0
+
+    # KSA - Key Scheduling Algorithm
+    for i in range(256):
+        j = (j + S[i] + key[i % len(key)]) & 0xff
+        S[i], S[j] = S[j], S[i]
+
+    # PRGA - Pseudo-Random Generation Algorithm
+    i = 0
+    j = 0
+
+    output = bytearray()
+
+    for byte in data:
+        i = (i + 1) & 0xff
+        j = (j + S[i]) & 0xff
+
+        S[i], S[j] = S[j], S[i]
+
+        keystream_byte = S[(S[i] + S[j]) & 0xff]
+
+        output.append(byte ^ keystream_byte)
+
+    return bytes(output)
+
+
+encrypted = Path(".jujutsukskdsa").read_bytes()
+
+key = bytes.fromhex(
+    "4c1fb7a3618a2d9e7b3ec0f52e9a64d1"
+    "9ea14f7c"
+    "f5d6823b"
+)
+
+decrypted = rc4(encrypted, key)
+
+Path("payload_decrypted.exe").write_bytes(decrypted)
+
+print("Payload salvo como payload_decrypted.exe")
+print("Primeiros bytes:", decrypted[:16].hex())
+
+Salve.
+
+Execute:
+
+python3 decrypt.py
+13. Verifique os primeiros bytes
+
+O script vai produzir algo parecido com:
+
+Primeiros bytes:
+4d5a90000300000004000000ffff0000
+
+Observe:
+
+4d 5a
+
+Em ASCII:
+
+MZ
+
+Essa é a assinatura clássica de um executável PE.
+
+Então a descriptografia funcionou.
+
+14. Confirme com file
+
+Execute:
+
+file payload_decrypted.exe
+
+No seu caso:
+
+PE32+ executable for MS Windows 4.00 (GUI), x86-64, 12 sections
+
+Isso confirma que:
+
+.jujutsukskdsa
+
+era um PE protegido.
+
+Antes:
+
+file .jujutsukskdsa
+
+→
+
+data
+
+Depois:
+
+file payload_decrypted.exe
+
+→
+
+PE32+ executable
+
+Essa é uma evidência muito boa para colocar no trabalho.
+
+15. Valide a assinatura PE manualmente
+
+Só MZ não é suficiente.
+
+Todo PE possui no offset:
+
+0x3C
+
+um ponteiro para a assinatura PE.
+
+Você pode verificar:
+
+od -Ax -tx1 -N160 payload_decrypted.exe
+
+No seu arquivo o e_lfanew aponta para:
+
+0x80
+
+Nesse offset existem os bytes:
+
+50 45 00 00
+
+que correspondem a:
+
+PE\0\0
+
+Portanto temos:
+
+offset 0x00 → MZ
+offset 0x80 → PE 00 00
+
+Isso confirma estruturalmente que é um PE válido.
+
+16. Calcule o hash do payload descriptografado
+
+Execute:
+
+sha256sum payload_decrypted.exe
+
+Resultado:
+
+c116b49ba8a2bdb0ee965193d44c5eacd72f6fa02797c44f1d8d50e82f3bbbe0
+
+Você agora tem três hashes:
+
+Arquivo	SHA-256
+mshelp.exe	2e0ecc68dc0b373d6360bd3b74b15bc3a367900628e5c1d333d23a484772cb24
+.jujutsukskdsa	8b7c603628fe7e5f7de0c06bde78075472e1d3fe5f9c3bda6965e569d3c666c5
+Payload recuperado	c116b49ba8a2bdb0ee965193d44c5eacd72f6fa02797c44f1d8d50e82f3bbbe0
+17. Agora descubra a técnica de execução
+
+Volte para:
+
+strings -a mshelp.exe
+
+As APIs principais encontradas são:
+
+CreateProcessA
+GetThreadContext
+SetThreadContext
+ResumeThread
+VirtualAllocEx
+WriteProcessMemory
+ReadProcessMemory
+NtUnmapViewOfSection
+NtQueryInformationProcess
+
+Observe a sequência.
+
+CreateProcessA cria um processo.
+
+GetThreadContext recupera os registradores da thread.
+
+NtQueryInformationProcess permite obter informações sobre o processo/PEB.
+
+ReadProcessMemory lê memória do processo.
+
+NtUnmapViewOfSection remove a imagem original.
+
+VirtualAllocEx aloca memória dentro de outro processo.
+
+WriteProcessMemory escreve o payload nesse processo.
+
+SetThreadContext altera o contexto da thread.
+
+ResumeThread inicia a execução.
+
+Esse conjunto é característico de Process Hollowing.
+
+18. A string notepad confirma o processo utilizado
+
+Faça:
+
+strings -a mshelp.exe | grep -i notepad
+
+Aparece:
+
+notepad criado PID=
+notepad ImageBase(antigo)=
+
+Isso indica que o processo hospedeiro escolhido é o notepad.
+
+Então a lógica fica aproximadamente:
+
+mshelp.exe
+    |
+    | lê
+    v
+.jujutsukskdsa
+    |
+    | RC4 decrypt
+    v
+PE descriptografado
+    |
+    | CreateProcess
+    v
+notepad.exe suspenso
+    |
+    | NtUnmapViewOfSection
+    v
+remove imagem original
+    |
+    | VirtualAllocEx
+    v
+aloca espaço
+    |
+    | WriteProcessMemory
+    v
+injeta novo PE
+    |
+    | SetThreadContext
+    v
+altera RIP
+    |
+    | ResumeThread
+    v
+payload executado no processo
+
+Isso é Process Hollowing.
+
+19. Procure evidências dentro do payload recuperado
+
+Execute:
+
+strings -a payload_decrypted.exe | less
+
+Ou:
+
+strings -a payload_decrypted.exe | grep -Ei "stealer|stub|pas"
+
+No seu arquivo aparecem:
+
+src/stealer_stub.pas
+stealer_stub.pas
+DEBUGSTART_$P$STEALER_STUB
+DEBUGEND_$P$STEALER_STUB
+
+Isso sugere fortemente que esse segundo PE foi compilado a partir de algo chamado:
+
+stealer_stub.pas
+
+Parece inclusive ter sido compilado com símbolos/informações de debug preservados.
+
+20. O que eu faria no Ghidra
+
+Essa parte é importante porque seu professor provavelmente vai querer evidência de engenharia reversa, e não apenas strings.
+
+Abra:
+
+ghidra
+
+Depois:
+
+File
+→ New Project
+→ Non-Shared Project
+
+importe:
+
+mshelp.exe
+
+Aceite:
+
+Analyze
+21. Procure primeiro por .jujutsukskdsa
+
+No Ghidra:
+
+Search
+→ For Strings
+
+procure:
+
+.jujutsukskdsa
+
+Clique na string.
+
+Depois veja:
+
+References
+→ Show References To
+
+ou pressione:
+
+X
+
+Isso mostra quais funções utilizam essa string.
+
+A partir daí você consegue encontrar a função responsável por abrir/carregar o arquivo.
+
+22. Procure RC4DECRYPT
+
+No Symbol Tree:
+
+Functions
+
+procure algo contendo:
+
+RC4DECRYPT
+
+Como o binário não está completamente stripped, o símbolo está praticamente entregue:
+
+RC4_$$_RC4DECRYPT...
+
+Abra a função.
+
+Depois pressione:
+
+X
+
+sobre ela para descobrir quem chama a função de descriptografia.
+
+Esse ponto é muito importante.
+
+Você deverá encontrar uma lógica aproximadamente:
+
+arquivo = carregar(".jujutsukskdsa");
+
+payload = RC4Decrypt(
+    arquivo,
+    RC4KEY,
+    RC4IV0,
+    RC4IV1
+);
+
+Os nomes podem estar diferentes no decompiler, mas conceitualmente é isso.
+
+23. Depois siga o payload após a descriptografia
+
+A pergunta agora é:
+
+O que acontece com o resultado de RC4DECRYPT?
+
+Siga a variável retornada.
+
+Você deve começar a encontrar verificações correspondentes ao PE, como:
+
+MZ
+PE
+ImageBase
+AddressOfEntryPoint
+SizeOfImage
+SizeOfHeaders
+NumberOfSections
+
+Isso mostra que o loader começa a interpretar o PE descriptografado.
+
+24. Procure CreateProcessA
+
+No Ghidra:
+
+Search
+→ For Strings
+
+ou pelo Symbol Tree, procure:
+
+CreateProcessA
+
+Depois:
+
+References To
+
+Você deverá encontrar a chamada que cria o processo hospedeiro.
+
+O detalhe essencial é verificar se existe:
+
+CREATE_SUSPENDED
+
+O valor dessa flag é:
+
+0x00000004
+
+Isso significa que o processo é criado mas sua thread principal não começa imediatamente.
+
+Esse comportamento é essencial para Process Hollowing.
+
+25. Depois procure NtUnmapViewOfSection
+
+A função:
+
+NtUnmapViewOfSection
+
+remove uma região mapeada do processo remoto.
+
+No contexto encontrado:
+
+notepad.exe
+
+é criado e sua imagem original é removida.
+
+Então há literalmente a etapa de "esvaziamento" do processo — daí o nome:
+
+Process Hollowing.
+
+26. Procure VirtualAllocEx
+
+Em seguida:
+
+VirtualAllocEx
+
+é utilizada para reservar memória dentro do processo notepad.
+
+Provavelmente você encontrará parâmetros relacionados a:
+
+ImageBase
+SizeOfImage
+MEM_COMMIT
+MEM_RESERVE
+PAGE_EXECUTE_READWRITE
+
+ou valores equivalentes.
+
+27. Procure WriteProcessMemory
+
+Essa API mostra onde o loader realmente transfere o PE.
+
+Pode haver uma gravação para:
+
+PE headers
+
+e diversas gravações para:
+
+sections
+
+O próprio executável possui mensagens como:
+
+Write headers falhou
+Write sec
+
+Ou seja, o loader aparentemente realiza algo semelhante a:
+
+WriteProcessMemory(
+    processo,
+    nova_base,
+    headers,
+    SizeOfHeaders
+);
+
+e depois:
+
+for cada section:
+    WriteProcessMemory(...)
+
+Isso é um mapeamento manual da imagem dentro do processo remoto.
+
+28. Atualização do PEB
+
+Uma das strings mais importantes é:
+
+PEB.ImageBaseAddress atualizado=
+
+O PEB é o:
+
+Process Environment Block
+
+Dentro dele existe a informação:
+
+ImageBaseAddress
+
+Como a imagem original do notepad.exe foi removida e substituída, o loader atualiza esse endereço.
+
+Isso reforça ainda mais a identificação de Process Hollowing.
+
+29. Alteração do RIP
+
+Existe outra string muito importante:
+
+SetThreadContext Rip=
+
+Em x64:
+
+RIP
+
+é o registrador que aponta para a próxima instrução a ser executada.
+
+O loader normalmente calcula:
+
+novo ImageBase + AddressOfEntryPoint
+
+e coloca esse valor no:
+
+RIP
+
+Então:
+
+RIP = PayloadImageBase + AddressOfEntryPoint
+30. Finalmente ResumeThread
+
+A última etapa é:
+
+ResumeThread
+
+O processo havia sido criado suspenso.
+
+Depois de:
+
+desmapear notepad
+→ alocar memória
+→ escrever payload
+→ ajustar PEB
+→ mudar RIP
+
+ele executa:
+
+ResumeThread
+
+A thread começa a executar, mas agora o entry point não é mais efetivamente o código original esperado do notepad.
+
+É o payload.
+
+A cadeia completa da investigação fica assim
+1. file mshelp.exe
+        ↓
+PE64 Windows
+
+2. file .jujutsukskdsa
+        ↓
+data
+
+3. strings mshelp.exe
+        ↓
+.jujutsukskdsa
+RC4DECRYPT
+RC4KEY
+RC4IV0
+RC4IV1
+
+4. objdump/nm
+        ↓
+localização das constantes
+
+5. leitura hexadecimal
+        ↓
+KEY = 4c1fb7...
+IV0 = 9ea14f7c
+IV1 = f5d6823b
+
+6. reproduzir RC4
+        ↓
+.jujutsukskdsa descriptografado
+
+7. arquivo começa com MZ
+        ↓
+PE encontrado
+
+8. PE\0\0 em 0x80
+        ↓
+estrutura confirmada
+
+9. strings/APIs do loader
+        ↓
+CreateProcessA
+NtUnmapViewOfSection
+VirtualAllocEx
+WriteProcessMemory
+GetThreadContext
+SetThreadContext
+ResumeThread
+
+10. notepad.exe
+        ↓
+processo hospedeiro
+
+11. conclusão
+        ↓
+PROCESS HOLLOWING
+A parte mais importante para sua entrega
+
+Não escreva simplesmente:
+
+"O programa usa Process Hollowing."
+
+Mostre como você provou.
+
+Por exemplo:
+
+A técnica foi identificada a partir da correlação entre as APIs CreateProcessA, NtQueryInformationProcess, ReadProcessMemory, NtUnmapViewOfSection, VirtualAllocEx, WriteProcessMemory, GetThreadContext, SetThreadContext e ResumeThread. Também foram encontradas strings indicando a criação do notepad.exe, leitura do PEB, obtenção e atualização do ImageBaseAddress, alteração do registrador RIP e retomada da thread. A sequência observada corresponde ao fluxo clássico de Process Hollowing.
+
+Esse tipo de justificativa deixa sua análise muito mais forte.
+
+Se você quiser reproduzir a análise como se estivesse fazendo agora no Kali, a próxima etapa pode ser eu te guiar comando por comando, começando do terminal, e você me manda a saída de cada comando para eu te explicar exatamente o que ela significa.

@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>CP 1 - Offensive - HTB</title>
+<style>
+  @page {
+    size: A4;
+    margin: 16mm 15mm 18mm 15mm;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', 'Calibri', system-ui, sans-serif;
+    color: #20242a;
+    line-height: 1.55;
+    font-size: 11pt;
+    margin: 0;
+  }
+
+  /* cover */
+  .cover {
+    text-align: center;
+    padding-top: 55mm;
+    page-break-after: always;
+  }
+  .cover .kicker {
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    font-size: 10pt;
+    color: #7a8290;
+    margin-bottom: 10mm;
+  }
+  .cover h1 {
+    font-size: 26pt;
+    margin: 0 0 6mm;
+    color: #11151c;
+    line-height: 1.15;
+  }
+  .cover .sub {
+    color: #5a6370;
+    font-size: 12pt;
+    margin-bottom: 18mm;
+  }
+  .members {
+    display: inline-block;
+    text-align: left;
+    border-top: 1px solid #e3e6ea;
+    padding-top: 8mm;
+    margin-top: 4mm;
+  }
+  .member {
+    display: flex;
+    justify-content: space-between;
+    gap: 12mm;
+    padding: 1.6mm 0;
+    font-size: 11.5pt;
+  }
+  .mname { color: #20242a; font-weight: 600; }
+  .mrm { color: #7a8290; font-family: Consolas, monospace; }
+
+  /* body */
+  h3 {
+    color: #11151c;
+    font-size: 14pt;
+    margin: 22px 0 8px;
+    padding-bottom: 4px;
+    border-bottom: 2px solid #e8ebef;
+    page-break-after: avoid;
+  }
+  p { margin: 6px 0; }
+  strong { color: #11151c; }
+  hr { border: none; border-top: 1px solid #eceff2; margin: 20px 0; }
+  ul { margin: 6px 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+
+  pre {
+    background: #0e141b;
+    color: #d8dee6;
+    padding: 10px 13px;
+    border-radius: 6px;
+    font-family: Consolas, 'Courier New', monospace;
+    font-size: 9.5pt;
+    line-height: 1.45;
+    overflow: hidden;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    page-break-inside: avoid;
+    margin: 8px 0;
+  }
+  pre code {
+    font-family: inherit;
+    color: inherit;
+    background: none;
+    padding: 0;
+  }
+  code {
+    font-family: Consolas, monospace;
+    background: #f0f2f5;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 9.5pt;
+  }
+
+  img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 10px auto;
+    border: 1px solid #dfe3e8;
+    border-radius: 5px;
+    page-break-inside: avoid;
+  }
+</style>
+</head>
+<body>
+<div class="cover">
+  <div class="kicker">FIAP &middot; Defesa Cibern&eacute;tica &middot; Offensive Security</div>
+  <h1>CP 1 - Offensive - HTB</h1>
+  <div class="sub">CheckPoint 1, relat&oacute;rio t&eacute;cnico</div>
+  <div class="members"><div class="member"><span class="mname">Ana Luiza Azevedo Morais</span><span class="mrm">RM 565771</span></div><div class="member"><span class="mname">Maria Eduarda Viana</span><span class="mrm">RM 564771</span></div><div class="member"><span class="mname">Thalia Aiko</span><span class="mrm">RM 561758</span></div></div>
+</div>
+<h3>Início - Reconhecimento Inicial</h3>
+<p>→ Após iniciar a vpn, e arrumar o /etc/hosts, começamos com um nmap: </p>
+<ul>
+<li><strong>Comando executado:</strong></li>
+</ul>
+<pre><code class="language-jsx"> nmap 10.129.106.124 -vvv
+</code></pre>
+<p><img alt="image.png" src="compressed/image.jpg" /></p>
+<p><strong>Explicação:</strong></p>
+<p>A varredura realizada com o Nmap identificou o host <strong>Checkpoint.htb (10.129.106.124)</strong> como ativo, apresentando 12 portas TCP abertas. Entre os serviços identificados estão DNS (53), Kerberos (88), LDAP (389), SMB (445), LDAPS (636), Global Catalog (3268/3269) e WinRM (5985).</p>
+<p>A combinação desses serviços indica características de um ambiente <strong>Windows Server com Active Directory</strong>, sendo provável que o host desempenhe a função de <strong>Controlador de Domínio (Domain Controller)</strong>. Os resultados obtidos fornecem informações relevantes sobre a infraestrutura e servem como base para etapas posteriores de enumeração e análise de segurança.</p>
+<hr />
+<h3>Descobrindo o nome do Domínio do IP alvo</h3>
+<ul>
+<li><strong>Comando executado:</strong></li>
+</ul>
+<pre><code class="language-jsx"> nmap 10.129.106.124 -vvv -sV
+</code></pre>
+<p><img alt="image.png" src="compressed/image%201.jpg" /></p>
+<p><strong>Explicação</strong>: </p>
+<p>A varredura realizada pelo Nmap identificou o host <strong>DC01,</strong> com o nome de dominio <strong>checkpoint.htb</strong>, com sistema operacional <strong>Windows</strong>, associado ao domínio <strong>checkpoint.htb,</strong> também foram identificados serviços como DNS, Kerberos, RPC, NetBIOS, SMB e LDAP, incluindo o Active Directory LDAP e o Global Catalog.</p>
+<p>A presença desses serviços confirma um ambiente <strong>Windows Active Directory</strong>, indicando que é um Domain Controller, também indentificamos versões e serviços disponíveis que são informações relevantes para a compreensão da infraestrutura e para futuras explorações.</p>
+<hr />
+<h3>Conferindo se o SMB está aceitando conexão do usuário “guest” (sem senha)</h3>
+<ul>
+<li><strong>Comandos utilizados e executados:</strong></li>
+</ul>
+<p>→ Vamos descobrir se o guest pode ser autenticado sem senha:</p>
+<pre><code class="language-jsx">netexec smb checkpoint.htb -u guest -p &quot;&quot;
+</code></pre>
+<p>→ Após o erro, foi utilizado um comando um pouco mais específico e direto, para garantir que a informação estava correta:</p>
+<pre><code class="language-jsx">smbclient -L //10.129.106.124 -U 'guest%'
+</code></pre>
+<p><img alt="image.png" src="compressed/image%202.jpg" /></p>
+<p><img alt="image.png" src="compressed/image%203.jpg" /></p>
+<p><strong>Explicação</strong>: </p>
+<p>Foi realizada uma tentativa de autenticação no serviço SMB utilizando a conta <strong>Guest</strong> com senha vazia, o servidor retornou <strong>NETBIOS timeout</strong>, para conferir foi usado outro comando semelhante e o servidor retornou o código <strong>NT_STATUS_ACCOUNT_DISABLED</strong>, indicando que a conta Guest encontra-se desabilitada no sistema. Dessa forma, não foi possível realizar autenticação ou enumerar os compartilhamentos SMB utilizando essa conta.</p>
+<hr />
+<h3>Login com a credencial correta</h3>
+<ul>
+<li><strong>Comando executado:</strong></li>
+</ul>
+<pre><code class="language-jsx">netexec smb checkpoint.htb -u alex.turner -p 'Checkpoint2024!'
+</code></pre>
+<p><img alt="image.png" src="compressed/image%204.jpg" /></p>
+<p><strong>Explicação</strong>: </p>
+<p>Podemos obter o acesso com as credenciais fornecidas, agora será possível realizar a exploração de forma mais eficaz.</p>
+<hr />
+<h3>Listagem de pastas compartilhadas</h3>
+<ul>
+<li><strong>Comando executado:</strong></li>
+</ul>
+<pre><code class="language-jsx">netexec smb checkpoint.htb -u alex.turner -p 'Checkpoint2024!' --shares
+</code></pre>
+<p><img alt="image.png" src="compressed/image%205.jpg" /></p>
+<p>Aqui podemos diversos diretórios, agora nós temos mais informações para explorar e identificar.</p>
+<hr />
+<h3>Exploração de diretórios</h3>
+<ul>
+<li><strong>Comandos executados:</strong></li>
+</ul>
+<p>→ Tentamos entrar na pasta ADMIN$ → Acesso negado.</p>
+<pre><code class="language-jsx">smbclient //checkpoint.htb/ADMIN$ -U &quot;alex.turner&quot;
+</code></pre>
+<hr />
+<p>→ Tentamos entrar na pasta C$ → Acesso negado.</p>
+<pre><code class="language-jsx">smbclient //checkpoint.htb/C$ -U &quot;alex.turner&quot;
+</code></pre>
+<p><img alt="image.png" src="compressed/image%206.jpg" /></p>
+<hr />
+<p>→ Tentamos entrar na pasta DevDrop → conseguimos entrar, não possui nenhum arquivo.</p>
+<pre><code class="language-jsx">smbclient //checkpoint.htb/DevDrop -U &quot;alex.turner&quot;
+</code></pre>
+<p><img alt="image.png" src="compressed/image%207.jpg" /></p>
+<hr />
+<p>→ Tentamos entrar na pasta IPC$ → conseguimos entrar, não possui nenhum arquivo para listagem.</p>
+<pre><code class="language-jsx">smbclient //checkpoint.htb/IPC$ -U &quot;alex.turner&quot;
+</code></pre>
+<p><img alt="image.png" src="compressed/image%208.jpg" /></p>
+<hr />
+<p>→ Tentamos entrar na pasta VMBackups → conseguimos entrar, porém, nossa conta não possui permissão para executar comando.</p>
+<pre><code class="language-jsx">smbclient //checkpoint.htb/VMBackups -U &quot;alex.turner&quot;
+</code></pre>
+<p><img alt="image.png" src="compressed/image%209.jpg" /></p>
+<hr />
+<p>→ Tentamos entrar na pasta NETLOGON → conseguimos entrar, mas não temos permissão para executar comandos.</p>
+<pre><code class="language-jsx">smbclient //10.129.106.124/VMBackups -U &quot;alex.turner&quot;
+</code></pre>
+<p><img alt="image.png" src="compressed/image%2010.jpg" /></p>
+<hr />
+<p>→ Por último, olhamos a pasta SYSVOL → trouxe algo importante, tem algumas pastas dentro dela, a principal é a de profile, ela nos trás informações das configurações das duas GPOs.</p>
+<pre><code class="language-jsx">smbclient //10.129.112.77/SYSVOL -U &quot;alex.turner&quot;
+</code></pre>
+<p>→ Primeiro, vemos que possui um diretório na pasta: </p>
+<p><img alt="image.png" src="compressed/image%2011.jpg" /></p>
+<p>→ Para facilitar a exploração usamos o seguinte <strong>comando</strong>: </p>
+<pre><code class="language-jsx">recurse on
+ls
+</code></pre>
+<p>→ Ele nos mostrou que muitas pastas estavam vazias, facilitando e economizando tempo, então fomos analisar a pasta profile, pois dentro dela contém um arquivo que pode ser importante:</p>
+<p><img alt="image.png" src="compressed/image%2012.jpg" /></p>
+<p><img alt="image.png" src="compressed/image%2013.jpg" /></p>
+<p><strong>→ Esse é o conteúdo do primeiro arquivo da primeira GPO:</strong> </p>
+<p><img alt="image.png" src="compressed/image%2014.jpg" /></p>
+<p><strong>→ Esse é o conteúdo da segunda GPO:</strong> </p>
+<p><img alt="image.png" src="compressed/image%2015.jpg" /></p>
+<p><strong>Explicação</strong>:</p>
+<p>Enquanto exploravamos o <strong>SYSVOL</strong>, encontramos dois arquivos <strong>GptTmpl.inf</strong> associados às políticas de grupo do domínio. </p>
+<p>O primeiro arquivo contém configurações relacionadas principalmente à política de senhas<strong>,</strong> bloqueio de contas e autenticação Kerberos, no meio das configurações encontradas estão:</p>
+<ul>
+<li>comprimento mínimo de senha de 7 caracteres</li>
+<li>exigência de complexidade</li>
+<li>histórico das últimas 24 senhas</li>
+<li>validade máxima de 42 dias</li>
+</ul>
+<p>Também foi identificado <strong>LockoutBadCount = 0</strong>, mostrando que não existe um limite de tentativas falhas configurado para o bloqueio da conta, além disso, o armazenamento de senhas em texto claro e de hashes LM está desabilitado.</p>
+<p>O segundo <strong>GptTmpl.inf</strong> possui configurações relacionadas à proteção das comunicações e aos privilégios do sistema, dentro dele encontramos o uso obrigatório de integridade no LDAP, o arquivo também define diversos privilégios administrativos para grupos específicos.</p>
+<p>Dessa forma percebemos que o ambiente possuimuitas medidas de segurança, principalmente na proteção de LDAP, SMB e credenciais, porem, algumas configurações, como o comprimento mínimo de senha e a ausência de um limite de bloqueio por tentativas inválidas, podem apresentar um problema, pois podem representar um problema.</p>
+<hr />
+<h3>RPCCLIENT</h3>
+<p>→ Primeiro nos conectamos, após isso rodamos o comando para listar os usuários do domínio</p>
+<ul>
+<li><strong>Comandos executados:</strong><ul>
+<li><strong>Conectar no RPCC:</strong></li>
+</ul>
+</li>
+</ul>
+<pre><code class="language-jsx">rpcclient -U 'checkpoint.htb\alex.turner%Checkpoint2024!' 10.129.112.77
+</code></pre>
+<ul>
+<li><strong>Procurar usuários</strong></li>
+</ul>
+<pre><code class="language-jsx">enumdomusers
+</code></pre>
+<p><img alt="image.png" src="compressed/image%2016.jpg" /></p>
+<p><strong>Explicação:</strong> </p>
+<p>Com esse comando é possível identificar usuários cadastrados no domínio, isso é uma informação importante porque nós podemos realizar a exploração desses usuários, quem sabe até acessar algum deles que possui um privilégio maior que o do Alex.</p>
+<hr />
+<h3>Informações do Alex</h3>
+<ul>
+<li><strong>Comando executado:</strong></li>
+</ul>
+<pre><code class="language-jsx">queryuser alex.turner
+</code></pre>
+<p><img alt="image.png" src="compressed/image%2017.jpg" /></p>
+<p><strong>Explicação:</strong> </p>
+<p>Essas informações ajudam a entender quem é o usuário, como a conta está configurada e quais características podem ser relevantes.</p>
+<hr />
+<h3>Grupos cadastrados no Domínio</h3>
+<ul>
+<li><strong>Comando executado:</strong></li>
+</ul>
+<pre><code class="language-jsx">enumdomgroups
+</code></pre>
+<p><img alt="image.png" src="compressed/image%2018.jpg" /></p>
+<p><strong>Explicação:</strong></p>
+<p>Essas informações permitem o conhecimento no domínio, esses grupos podem ser explorados após a etapa de reconhecimento</p>
+<hr />
+<h3>Análise dos RIDs do grupo de Administradores</h3>
+<ul>
+<li><strong>Comando executado:</strong></li>
+</ul>
+<pre><code class="language-jsx">querygroupmem 512
+</code></pre>
+<p><img alt="image.png" src="compressed/image%2019.jpg" /></p>
+<p><strong>Explicação</strong>:</p>
+<p>Como o grupo de admins possui o RID padrão 512, fomos analisa-lo, foi encontrado a conta de “administrador” e também de um usuário que corresponde a “max.palmer”</p>
+<hr />
+<h3>Tentando ver as informações dos integrantes do grupo Admins</h3>
+<p>→ Mesmo que não seja necessário, vamos passar os RIDs <strong>0x13ed</strong> &amp; <strong>0x1f4</strong> para decimal obtemos <strong>5101</strong> &amp; <strong>500</strong>, vamos pesquisar por eles.</p>
+<h3>Olhando Max Palmer</h3>
+<ul>
+<li><strong>Comando executado:</strong></li>
+</ul>
+<pre><code class="language-jsx">queryuser 5101
+</code></pre>
+<p><img alt="image.png" src="compressed/image%2020.jpg" /></p>
+<p><strong>Explicação:</strong> </p>
+<p>Por se tratar de uma conta vinculada ao grupo de administradores, pode ser que as informações de conta ajude-nos em uma exploração futura.</p>
+<hr />
+<h3>Olhando o outro Administrador</h3>
+<p>→ O outro administrador que possui o RID 0x1f4:</p>
+<ul>
+<li><strong>Comando executado:</strong></li>
+</ul>
+<pre><code class="language-jsx">queryuser 5101
+</code></pre>
+<p><img alt="image.png" src="compressed/image%2021.jpg" /></p>
+<p><strong>Explicação:</strong></p>
+<p>Igual a outra conta de administrador, as informações desse usuário podem ajudar em algum momento.</p>
+<hr />
+</body>
+</html>

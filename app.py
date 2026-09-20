@@ -22,6 +22,67 @@ app.secret_key = secrets.token_hex(32)
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 DATABASE = os.path.join(app.instance_path, 'security_alert.db')
 
+# ─── Badges disponiveis (emoji depois troca por imagem) ───────
+# Nova grade alinhada as fases do treinamento.
+BADGES = [
+    {
+        "id": "escudo",
+        "icon": "img/badges/escudo.png",
+        "name": "Escudo de Conclusão",
+        "description": "Complete todo o treinamento de segurança.",
+        "requirement": "Termine uma sessão de jogo completa.",
+        "rarity": "comum"
+    },
+    {
+        "id": "chave",
+        "icon": "img/badges/chave.png",
+        "name": "Mestre das Senhas",
+        "description": "Complete a primeira fase sobre senhas seguras.",
+        "requirement": "Termine a fase Senhas Seguras.",
+        "rarity": "comum"
+    },
+    {
+        "id": "cadeado",
+        "icon": "img/badges/cadeado.png",
+        "name": "Guardiao da Atencao",
+        "description": "Complete a fase de Negligência e Atenção.",
+        "requirement": "Termine a fase Negligência e Atenção.",
+        "rarity": "comum"
+    },
+    {
+        "id": "phishing",
+        "icon": "img/badges/phishing.png",
+        "name": "Phishing Invicto",
+        "description": "Complete a fase de Phishing.",
+        "requirement": "Termine a fase Phishing.",
+        "rarity": "raro"
+    },
+    {
+        "id": "engrenagem",
+        "icon": "img/badges/engrenagem.png",
+        "name": "Anti Engenharia Social",
+        "description": "Complete a fase de Engenharia Social.",
+        "requirement": "Termine a fase ligação - Engenharia Social (telefone).",
+        "rarity": "raro"
+    },
+    {
+        "id": "celular",
+        "icon": "img/badges/celular.png",
+        "name": "Uso Consciente de Dispositivos",
+        "description": "Complete a fase de Uso de dispositivos pessoais.",
+        "requirement": "Termine a fase Uso de dispositivos pessoais.",
+        "rarity": "raro"
+    },
+    {
+        "id": "cem_porcento",
+        "icon": "img/badges/cem.png",
+        "name": "Score Perfeito",
+        "description": "Atinja a pontuação máxima em uma sessão.",
+        "requirement": "Pontuação total máxima em um jogo.",
+        "rarity": "epico"
+    }
+]
+
 # ─── Filtros Jinja ───────────────────────────────────────────
 @app.template_filter('br_date')
 def br_date(value):
@@ -63,8 +124,11 @@ def init_db():
             password_hash TEXT NOT NULL,
             show_in_ranking BOOLEAN DEFAULT 1,
             character TEXT DEFAULT 'ana',
+            profile_image TEXT,
+            loja TEXT,
             reset_token TEXT,
             reset_token_expires TIMESTAMP,
+            is_admin BOOLEAN DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -91,6 +155,15 @@ def init_db():
             answered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (session_id) REFERENCES game_sessions(id)
         );
+
+        CREATE TABLE IF NOT EXISTS user_badges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            badge_id TEXT NOT NULL,
+            unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, badge_id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
     """)
     # Migra banco existente (caso ja exista sem as colunas)
     cols = [r["name"] for r in db.execute("PRAGMA table_info(users)").fetchall()]
@@ -98,6 +171,12 @@ def init_db():
         db.execute("ALTER TABLE users ADD COLUMN show_in_ranking BOOLEAN DEFAULT 1")
     if "character" not in cols:
         db.execute(f"ALTER TABLE users ADD COLUMN character TEXT DEFAULT '{DEFAULT_CHARACTER}'")
+    if "profile_image" not in cols:
+        db.execute("ALTER TABLE users ADD COLUMN profile_image TEXT")
+    if "loja" not in cols:
+        db.execute("ALTER TABLE users ADD COLUMN loja TEXT")
+    if "is_admin" not in cols:
+        db.execute("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0")
     answer_cols = [r["name"] for r in db.execute("PRAGMA table_info(phase_answers)").fetchall()]
     if "timed_out" not in answer_cols:
         db.execute("ALTER TABLE phase_answers ADD COLUMN timed_out BOOLEAN DEFAULT 0")
@@ -112,6 +191,22 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash('Voce precisa fazer login para acessar essa pagina.', 'warning')
+            return redirect(url_for('login'))
+        db = get_db()
+        user = db.execute("SELECT is_admin FROM users WHERE id = ?", (session['user_id'],)).fetchone()
+        if not user or not user['is_admin']:
+            flash('Acesso restrito a administradores.', 'danger')
+            return redirect(url_for('dashboard'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 
 # ─── Dados do Jogo ───────────────────────────────────────────
 CHARACTERS = {
@@ -144,14 +239,18 @@ GAME_PHASES = {
         "boss_name": "Chefe Carlos",
         "explanation": (
             "Bem-vindo(a) ao seu primeiro dia de treinamento! "
-            "Sou seu chefe, Carlos, e vou te ensinar sobre a importância de senhas fortes no seu dia a dia! Sabia que senhas fracas são a principal porta de entrada para hackers? "
-            "Vamos aprender a criar senhas que são verdadeiras fortalezas digitais!"
+            "Sou seu chefe, Carlos, e vou te ensinar sobre a importância de senhas fortes no seu dia a dia! "
+            "Sabia que senhas fracas são a principal porta de entrada para hackers? "
+            "Vamos aprender a criar senhas que são verdadeiras fortalezas digitais! "
+            "A primeira tarefa é: construir senhas fortes! Você sabia que usar seus dados públicos como senha podem ser usados como diferentes combinações para atacantes? "
+            "Veja como seus dados viram senhas fracas para atacantes utilizarem! "
         ),
         "subphases": [
             {
                 "id": 1,
                 "title": "Construtor de senha com dados",
                 "mode": "password_builder",
+                "scorable": False,  # subfase educativa: nao conta pontos nem no max_score
                 "question": (
                     "Digite dados fictícios e veja que senhas fracas um "
                     "atacante poderia montar com eles."
@@ -181,7 +280,7 @@ GAME_PHASES = {
         "boss_name": "Chefe Carlos",
         "explanation": (
             "Muito bem até aqui! Agora vou testar sua atenção com uma tarefa diferente. "
-            "Na empresa lidamos com todo tipo de arquivo — e cada um tem um nível de acesso. "
+            "Na empresa lidamos com todo tipo de arquivo, e cada um tem um nível de acesso. "
             "Você vai receber 5 documentos e deve classificá-los como Público, Interno ou Confidencial. "
             "Um documento no lugar errado pode vazar informações sigilosas. Vamos lá!"
         ),
@@ -326,8 +425,8 @@ GAME_PHASES = {
         "color": "#5a8581",
         "boss_name": "Chefe Carlos",
         "explanation": (
-            "Voce esta indo muito bem! Agora chegamos ao ataque mais comum no mundo corporativo: "
-            "o Phishing. Ele pode vir por e-mail, telefone, SMS ou ate WhatsApp. "
+            "Voce está indo muito bem! Agora chegamos ao ataque mais comum no mundo corporativo: "
+            "o Phishing. Ele pode vir por e-mail, telefone, SMS ou até WhatsApp. "
             "Seu objetivo é aprender a identificar essas tentativas antes de cair nelas!"
         ),
         "subphases": [
@@ -374,7 +473,7 @@ GAME_PHASES = {
                 "correct": 1,
                 "explanation_correct": (
                     "🎉 Parabéns! Você identificou e reportou o e-mail FALSO corretamente! "
-                    "O e-mail 2 vinha de 'ti@ler0y-merlin.com.br' — repare no HÍFEN e no número 0 do domínio. "
+                    "O e-mail 2 vinha de 'ti@ler0y-merlin.com.br', repare no HÍFEN e no número 0 do domínio. "
                     "O domínio oficial da Leroy Merlin é @leroymerlin.com.br (sem hífen). "
                     "Além disso, ele usava um link suspeito ('portall...') e tom de urgência, "
                     "sinais clássicos de phishing. Reportar ao TI foi a atitude correta!"
@@ -497,31 +596,6 @@ GAME_PHASES = {
         ),
         "subphases": [
             {
-                "id": 1,
-                "title": "Senha anotada no post-it",
-                "question": (
-                    "Você anotou a senha do sistema da empresa em um post-it para não esquecer. Depois de decorar, "
-                    "jogou o papel no lixo da sala. Qual é o problema?"
-                ),
-                "options": [
-                    "Só seria perigoso se o papel tivesse também o nome do sistema, não apenas a senha.",
-                    "O problema é apenas ambiental, pelo desperdício de papel.",
-                    "O papel pode ser encontrado no lixo por alguém mal-intencionado, que poderá usar a senha para entrar no sistema da empresa.",
-                    "Nenhum, porque senhas em papel não servem para ataques pela internet."
-                ],
-                "correct": 2,
-                "explanation_correct": (
-                    "Excelente! ✅ Alguém pode revirar o lixo procurando exatamente esse tipo de informação — senhas, "
-                    "documentos, anotações. Basta digitar a senha no sistema para entrar."
-                ),
-                "explanation_wrong": (
-                    "❌ A senha escrita em papel funciona perfeitamente quando digitada — o criminoso não precisa invadir nada, "
-                    "é só ler e usar (D). O desperdício de papel (B) é o menor dos problemas: o risco real é de segurança da informação, "
-                    "com vazamento de dados da empresa. E a senha por si só já é suficiente para o ataque (A) — saber o nome do sistema "
-                    "é um detalhe, já que muitas vezes é óbvio qual sistema a empresa usa."
-                )
-            },
-            {
                 "id": 2,
                 "title": "Pen drive de banca de rua",
                 "question": (
@@ -540,7 +614,7 @@ GAME_PHASES = {
                     "conectados. Para arquivos da empresa, use apenas dispositivos confiáveis."
                 ),
                 "explanation_wrong": (
-                    "❌ 'Novo e barato' não significa seguro — o dispositivo pode ter sido preparado para parecer normal, mas conter "
+                    "❌ 'Novo e barato' não significa seguro. O dispositivo pode ter sido preparado para parecer normal, mas conter "
                     "ameaças invisíveis (D). O antivírus (C) não detecta tudo, especialmente ameaças escondidas no firmware do pen drive; "
                     "quando você conecta para escanear, o ataque pode já ter acontecido. E formatar (A) limpa os arquivos, mas não remove "
                     "ameaças que estão no firmware do dispositivo."
@@ -565,82 +639,7 @@ GAME_PHASES = {
                     "❌ Sem bloqueio de tela (D), qualquer pessoa que pegue seu celular terá acesso livre aos e-mails e documentos da empresa — "
                     "é como deixar a porta de casa aberta. Se sua conta pessoal for invadida (B), o atacante terá automaticamente a senha da "
                     "empresa também: cada conta deve ter senha diferente. E misturar tudo no mesmo espaço (A) faz com que um app pessoal com "
-                    "problema possa acessar dados corporativos — a separação é essencial para isolar os riscos."
-                )
-            },
-            {
-                "id": 4,
-                "title": "Computador compartilhado em casa",
-                "question": (
-                    "Você trabalha em home office e seu filho usa o mesmo computador para jogar e acessar sites na internet. "
-                    "Qual é o risco para a empresa?"
-                ),
-                "options": [
-                    "Só há risco se o filho usar a conta de usuário que você usa para trabalhar.",
-                    "Nenhum, porque o computador separa totalmente as contas de usuário diferentes.",
-                    "O único problema é o computador ficar lento para trabalhar.",
-                    "O filho pode, sem querer, instalar programas ou acessar sites que infectem o computador, comprometendo os dados da empresa que estão no mesmo aparelho."
-                ],
-                "correct": 3,
-                "explanation_correct": (
-                    "Isso mesmo! ✅ Mesmo com contas separadas, o computador compartilha o mesmo sistema e a mesma rede. Um vírus instalado "
-                    "pelo filho pode se espalhar e alcançar os dados da empresa."
-                ),
-                "explanation_wrong": (
-                    "❌ A separação entre contas (B) não é total: um vírus bem feito consegue atravessar essa barreira e acessar tudo no "
-                    "computador, inclusive arquivos da empresa. Lentidão (C) é o menor dos problemas — o risco real é roubo de senhas e "
-                    "vazamento de dados corporativos sem ninguém perceber. E o risco existe independente da conta usada (A): um vírus instalado "
-                    "na conta do filho pode infectar o sistema inteiro e afetar também a sua conta de trabalho."
-                )
-            },
-            {
-                "id": 5,
-                "title": "Descarte de computador",
-                "question": (
-                    "Você vai descartar um computador pessoal que usava para acessar o sistema da empresa. O que você deve fazer antes "
-                    "de doá-lo ou vendê-lo?"
-                ),
-                "options": [
-                    "Apenas esvaziar a lixeira do sistema operacional antes de entregar o computador.",
-                    "Doar para uma instituição de caridade, pois eles não terão interesse nos dados da empresa.",
-                    "Garantir que os dados sejam totalmente destruídos — por sobrescrita, criptografia ou destruição física — para que ninguém consiga recuperá-los.",
-                    "Apagar os arquivos visíveis e formatar o computador. Pronto para doar."
-                ],
-                "correct": 2,
-                "explanation_correct": (
-                    "Correto! ✅ Apagar arquivos ou formatar não destrói os dados de verdade — eles continuam no disco até serem sobrescritos. "
-                    "Só técnicas especiais ou destruição física garantem que ninguém recupere nada."
-                ),
-                "explanation_wrong": (
-                    "❌ Formatar (D) só apaga a 'lista' de arquivos, mas os dados continuam lá — ferramentas gratuitas conseguem recuperar tudo "
-                    "facilmente. O computador doado (B) pode ser revendido, perdido ou roubado: a responsabilidade pelos dados da empresa continua "
-                    "sendo sua, não importa para quem você doou. E esvaziar a lixeira (A) só remove a referência ao arquivo — os dados continuam no "
-                    "disco e podem ser recuperados por qualquer pessoa com ferramentas simples."
-                )
-            },
-            {
-                "id": 6,
-                "title": "HD externo suspeito",
-                "question": (
-                    "Você encontrou um HD externo à venda na internet por um preço muito abaixo do mercado. Precisa de espaço extra para "
-                    "guardar arquivos do trabalho. O que você faz?"
-                ),
-                "options": [
-                    "Comprar e usar apenas se o vendedor tiver boa avaliação na plataforma.",
-                    "Comprar e usar, pois é uma boa oportunidade e HDs são só armazenamento.",
-                    "Não usar para arquivos da empresa. Dispositivos de procedência duvidosa podem conter ameaças escondidas que infectam o computador ao serem conectados.",
-                    "Comprar, passar o antivírus e depois usar sem problemas."
-                ],
-                "correct": 2,
-                "explanation_correct": (
-                    "Exato! ✅ HDs de origem duvidosa podem vir com programas escondidos que instalam vírus assim que você conecta. Para arquivos "
-                    "da empresa, só use dispositivos confiáveis."
-                ),
-                "explanation_wrong": (
-                    "❌ HD não é 'só armazenamento' (B): ele pode conter ameaças no próprio firmware, que ativam assim que é conectado ao "
-                    "computador. O antivírus (D) não detecta tudo — e quando você conecta o HD para escanear, o ataque pode já ter acontecido, "
-                    "antes mesmo do antivírus terminar. Boa avaliação do vendedor (A) também não garante segurança: o vendedor pode nem saber que "
-                    "o dispositivo está comprometido. Procedência duvidosa é risco, não importa a avaliação."
+                    "problema possa acessar dados corporativos. A separação é essencial para isolar os riscos."
                 )
             },
             {
@@ -661,9 +660,9 @@ GAME_PHASES = {
                     "o computador como ponte para atacar a empresa."
                 ),
                 "explanation_wrong": (
-                    "❌ Ser gratuito (C) não significa seguro — muitos vírus são distribuídos justamente em programas 'gratuitos' para atrair "
+                    "❌ Ser gratuito (C) não significa seguro. Muitos vírus são distribuídos justamente em programas 'gratuitos' para atrair "
                     "usuários desavisados. O problema vai muito além de punição administrativa (D): há um risco técnico real de vazamento de dados "
-                    "e comprometimento dos sistemas da empresa. E lentidão (A) é o menor dos problemas — o perigo é invisível e silencioso: o vírus "
+                    "e comprometimento dos sistemas da empresa. E lentidão (A) é o menor dos problemas, o perigo é invisível e silencioso: o vírus "
                     "pode agir por meses sem que você perceba nada de errado."
                 )
             },
@@ -683,7 +682,7 @@ GAME_PHASES = {
                     "descubra sua senha, não consegue acessar sem o segundo fator. Antivírus e atualizações fecham brechas conhecidas."
                 ),
                 "explanation_wrong": (
-                    "❌ Antivírus desligado (D) deixa o computador desprotegido — a perda de performance é mínima perto do risco de comprometer "
+                    "❌ Antivírus desligado (D) deixa o computador desprotegido. A perda de performance é mínima perto do risco de comprometer "
                     "dados da empresa. Mesmo a senha mais forte, se reutilizada em vários lugares (B), vira ponto único de falha: se uma conta for "
                     "invadida, todas as outras com a mesma senha também estarão comprometidas. E o firewall (A) bloqueia conexões perigosas de fora "
                     "para dentro — desligá-lo deixa o computador exposto a invasões e a vírus se comunicando com criminosos pela internet."
@@ -691,10 +690,10 @@ GAME_PHASES = {
             },
             {
                 "id": 9,
-                "title": "Pen drive infectado — ataque em andamento!",
+                "title": "Pen drive infectado - ataque em andamento!",
                 "question": (
                     "🚨 AMEAÇA ATIVA! Você conectou um pen drive infectado ao computador da empresa e percebeu que ele pode estar comprometido. "
-                    "O ataque já começou — decida rápido, antes que o hacker complete a invasão!"
+                    "O ataque já começou - decida rápido, antes que o hacker complete a invasão!"
                 ),
                 "options": [
                     "Continuar usando o computador normalmente e avisar a TI apenas se aparecer algum problema.",
@@ -708,7 +707,7 @@ GAME_PHASES = {
                 "hacked_text": (
                     "💀 O tempo acabou e o malware se espalhou pelo computador antes de você reagir. Todos os pontos desta fase foram perdidos. "
                     "No mundo real, a atitude correta era: desconectar o pen drive, não abrir nem executar arquivos dele e comunicar IMEDIATAMENTE "
-                    "a TI ou o responsável pela segurança — isso permite analisar a máquina e evita que a infecção se espalhe."
+                    "a TI ou o responsável pela segurança, isso permite analisar a máquina e evita que a infecção se espalhe."
                 ),
                 "saved_title": "Você salvou a empresa.",
                 "explanation_correct": (
@@ -805,18 +804,29 @@ GAME_PHASES = {
 def index():
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
-    # Busca ranking nacional (somente quem ativou a opcao)
+    # Busca ranking por loja: soma do melhor score dos usuarios de cada loja
     db = get_db()
+    max_score_possible = sum(
+        sum(1 for s in p['subphases'] if s.get('scorable', True))
+        for p in GAME_PHASES.values()
+    ) * 100
     ranking = db.execute("""
-        SELECT u.username, MAX(gs.score) as best_score, MAX(gs.max_score) as max_score
-        FROM game_sessions gs
-        JOIN users u ON gs.user_id = u.id
-        WHERE gs.completed = 1 AND u.show_in_ranking = 1
-        GROUP BY u.id
-        ORDER BY best_score DESC
+        SELECT u.loja,
+               SUM(COALESCE(best.best_score, 0)) as total_score,
+               COUNT(DISTINCT u.id) as total_players
+        FROM users u
+        LEFT JOIN (
+            SELECT user_id, MAX(score) as best_score
+            FROM game_sessions
+            WHERE completed = 1
+            GROUP BY user_id
+        ) best ON best.user_id = u.id
+        WHERE u.show_in_ranking = 1 AND u.loja IS NOT NULL AND u.loja != ''
+        GROUP BY u.loja
+        ORDER BY total_score DESC
         LIMIT 10
     """).fetchall()
-    return render_template('index.html', ranking=ranking)
+    return render_template('index.html', ranking=ranking, max_score_possible=max_score_possible)
 
 @app.route('/about')
 def about():
@@ -825,8 +835,9 @@ def about():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        username = request.form.get('username', '').strip()
+        username = request.form.get('username', '').strip().lower()
         email = request.form.get('email', '').strip().lower()
+        loja = request.form.get('loja', '').strip()
         password = request.form.get('password', '')
         confirm = request.form.get('confirm', '')
 
@@ -835,6 +846,8 @@ def register():
             errors.append('Nome de usuario deve ter pelo menos 3 caracteres.')
         if len(email) < 5 or '@' not in email:
             errors.append('Email invalido.')
+        if loja not in ['Loja A', 'Loja B']:
+            errors.append('Selecione uma loja valida.')
         if len(password) < 6:
             errors.append('Senha deve ter pelo menos 6 caracteres.')
         if password != confirm:
@@ -858,8 +871,8 @@ def register():
         password_hash = generate_password_hash(password)
         show_in_ranking = 1 if request.form.get('show_in_ranking') else 0
         db.execute(
-            "INSERT INTO users (username, email, password_hash, show_in_ranking) VALUES (?, ?, ?, ?)",
-            (username, email, password_hash, show_in_ranking)
+            "INSERT INTO users (username, email, password_hash, show_in_ranking, loja) VALUES (?, ?, ?, ?, ?)",
+            (username, email, password_hash, show_in_ranking, loja)
         )
         db.commit()
 
@@ -884,7 +897,9 @@ def login():
             session.permanent = True
             session['user_id'] = user['id']
             session['username'] = user['username']
-            flash(f'Bem-vindo(a) de volta, {user["username"]}! 🛡️', 'success')
+            session['profile_image'] = user['profile_image'] or ''
+            session['is_admin'] = bool(user['is_admin'])
+            flash(f'Bem-vindo(a) de volta, {user["username"]}!', 'success')
             return redirect(url_for('dashboard'))
         else:
             flash('Usuario/email ou senha incorretos.', 'danger')
@@ -895,6 +910,286 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for('index'))
+
+@app.route('/perfil', methods=['GET', 'POST'])
+@login_required
+def perfil():
+    db = get_db()
+    user_id = session['user_id']
+
+    if request.method == 'POST':
+        file = request.files.get('profile_image')
+        if file and file.filename:
+            ext = file.filename.rsplit('.', 1)[-1].lower()
+            if ext not in {'png', 'jpg', 'jpeg', 'gif', 'webp'}:
+                flash('Formato invalido. Use PNG, JPG, GIF ou WEBP.', 'danger')
+                return redirect(url_for('perfil'))
+
+            filename = f"user_{user_id}.{ext}"
+            upload_dir = os.path.join(app.root_path, 'static', 'img', 'avatars')
+            os.makedirs(upload_dir, exist_ok=True)
+
+            # remove imagem antiga se existir
+            old = db.execute("SELECT profile_image FROM users WHERE id = ?", (user_id,)).fetchone()
+            if old and old['profile_image']:
+                old_path = os.path.join(upload_dir, old['profile_image'])
+                try:
+                    os.remove(old_path)
+                except FileNotFoundError:
+                    pass
+
+            file.save(os.path.join(upload_dir, filename))
+            db.execute("UPDATE users SET profile_image = ? WHERE id = ?", (filename, user_id))
+            db.commit()
+            session['profile_image'] = filename
+            flash('Foto de perfil atualizada!', 'success')
+
+        return redirect(url_for('perfil'))
+
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    user_badges = get_user_badges(user_id)
+    return render_template('perfil.html', user=user, badges=user_badges)
+
+def get_user_badges(user_id):
+    """Retorna a lista de badges conquistadas pelo usuario (com dados completos)."""
+    db = get_db()
+    unlocked = {
+        row['badge_id']: row['unlocked_at']
+        for row in db.execute("SELECT badge_id, unlocked_at FROM user_badges WHERE user_id = ?", (user_id,)).fetchall()
+    }
+    result = []
+    for badge in BADGES:
+        b = dict(badge)
+        b['unlocked_at'] = unlocked.get(badge['id'])
+        b['unlocked'] = badge['id'] in unlocked
+        result.append(b)
+    return result
+
+
+def check_and_award_badges(user_id):
+    """Verifica condicoes e desbloqueia badges automaticamente."""
+    db = get_db()
+
+    unlocked = {
+        row['badge_id'] for row in
+        db.execute("SELECT badge_id FROM user_badges WHERE user_id = ?", (user_id,)).fetchall()
+    }
+
+    # Estatisticas do usuario
+    completed_sessions = db.execute(
+        "SELECT id, score, max_score FROM game_sessions WHERE user_id = ? AND completed = 1",
+        (user_id,)
+    ).fetchall()
+
+    answers = db.execute(
+        "SELECT phase, subphase, correct FROM phase_answers WHERE session_id IN ("
+        "SELECT id FROM game_sessions WHERE user_id = ? AND completed = 1"
+        ")",
+        (user_id,)
+    ).fetchall()
+
+    new_badges = []
+
+    # Conta quantas fases distintas foram respondidas em sessoes completadas
+    fases_respondidas = set()
+    for a in answers:
+        fases_respondidas.add(a['phase'])
+
+    # 1. Escudo de Conclusao: completou ao menos 1 sessao
+    if 'escudo' not in unlocked and completed_sessions:
+        new_badges.append('escudo')
+
+    # 2. Chave: terminou fase 1 (senhas)
+    if 'chave' not in unlocked and 1 in fases_respondidas:
+        new_badges.append('chave')
+
+    # 3. Cadeado: terminou fase 2 (negligencia e atencao)
+    if 'cadeado' not in unlocked and 2 in fases_respondidas:
+        new_badges.append('cadeado')
+
+    # 4. Phishing: terminou fase 3 (phishing)
+    if 'phishing' not in unlocked and 3 in fases_respondidas:
+        new_badges.append('phishing')
+
+    # 5. Engrenagem: terminou fase 4 (engenharia social - telefone)
+    if 'engrenagem' not in unlocked and 4 in fases_respondidas:
+        new_badges.append('engrenagem')
+
+    # 6. Celular: terminou fase 5 (uso de dispositivos pessoais)
+    if 'celular' not in unlocked and 5 in fases_respondidas:
+        new_badges.append('celular')
+
+    # 7. Score Perfeito: score == max_score em alguma sessao
+    if 'cem_porcento' not in unlocked:
+        for s in completed_sessions:
+            if s['score'] >= s['max_score'] and s['max_score'] > 0:
+                new_badges.append('cem_porcento')
+                break
+
+    for badge_id in new_badges:
+        db.execute(
+            "INSERT OR IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)",
+            (user_id, badge_id)
+        )
+
+    if new_badges:
+        db.commit()
+
+    return new_badges
+
+
+@app.route('/badges')
+@login_required
+def badges():
+    user_badges = get_user_badges(session['user_id'])
+    return render_template('badges.html', badges=BADGES, user_badges=user_badges)
+
+@app.route('/desafios')
+@login_required
+def desafios():
+    modulos = [
+        {
+            'titulo': 'Modulo 1 - X',
+            'atividades': [
+                {'titulo': 'Curso X', 'url': '#'},
+                {'titulo': 'Desafio: X', 'url': '#'},
+            ]
+        },
+        {
+            'titulo': 'Modulo 2 - Phishing e Engenharia Social',
+            'atividades': [
+                {'titulo': 'Curso X', 'url': '#'},
+                {'titulo': 'Desafio: X', 'url': '#'},
+            ]
+        },
+        {
+            'titulo': 'Modulo 3 - Logs e Monitoramento',
+            'atividades': [
+                {'titulo': 'Curso X', 'url': '#'},
+                {'titulo': 'Desafio: X', 'url': '#'},
+            ]
+        },
+        {
+            'titulo': 'Modulo 4 - Resposta a Incidentes',
+            'atividades': [
+                {'titulo': 'Ciclo de resposta a incidentes', 'url': '#'},
+                {'titulo': 'Case: Ransomware na loja', 'url': '#'},
+                {'titulo': 'Simulacao: Contencao do ataque', 'url': '#'},
+            ]
+        },
+    ]
+    return render_template('desafios.html', modulos=modulos)
+
+
+@app.route('/admin')
+@admin_required
+def admin_panel():
+    db = get_db()
+    users = db.execute("""
+        SELECT u.*,
+               COUNT(DISTINCT gs.id) as total_games,
+               COUNT(DISTINCT CASE WHEN gs.completed = 1 THEN gs.id END) as completed_games,
+               COALESCE(MAX(CASE WHEN gs.completed = 1 THEN gs.score END), 0) as best_score
+        FROM users u
+        LEFT JOIN game_sessions gs ON gs.user_id = u.id
+        GROUP BY u.id
+        ORDER BY u.id
+    """).fetchall()
+    return render_template('admin.html', users=users)
+
+
+@app.route('/admin/user/<int:user_id>/reset-password', methods=['POST'])
+@admin_required
+def admin_reset_password(user_id):
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        flash('Usuario nao encontrado.', 'danger')
+        return redirect(url_for('admin_panel'))
+
+    if user['id'] == session['user_id']:
+        flash('Use a troca de senha normal para sua propria conta.', 'warning')
+        return redirect(url_for('admin_panel'))
+
+    new_password = request.form.get('new_password', '').strip()
+    if len(new_password) < 6:
+        flash('Senha deve ter pelo menos 6 caracteres.', 'danger')
+        return redirect(url_for('admin_panel'))
+
+    db.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (generate_password_hash(new_password), user_id)
+    )
+    db.commit()
+    flash(f"Senha de {user['username']} redefinida com sucesso.", 'success')
+    return redirect(url_for('admin_panel'))
+
+
+@app.route('/admin/user/<int:user_id>/reset-progress', methods=['POST'])
+@admin_required
+def admin_reset_progress(user_id):
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        flash('Usuario nao encontrado.', 'danger')
+        return redirect(url_for('admin_panel'))
+
+    if user['id'] == session['user_id']:
+        flash('Voce nao pode resetar seu proprio progresso por aqui.', 'warning')
+        return redirect(url_for('admin_panel'))
+
+    # apaga sessoes e respostas
+    db.execute("DELETE FROM phase_answers WHERE session_id IN (SELECT id FROM game_sessions WHERE user_id = ?)", (user_id,))
+    db.execute("DELETE FROM game_sessions WHERE user_id = ?", (user_id,))
+    db.execute("DELETE FROM user_badges WHERE user_id = ?", (user_id,))
+    db.commit()
+    flash(f"Progresso de {user['username']} resetado com sucesso.", 'success')
+    return redirect(url_for('admin_panel'))
+
+
+@app.route('/admin/user/<int:user_id>/toggle-admin', methods=['POST'])
+@admin_required
+def admin_toggle_admin(user_id):
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        flash('Usuario nao encontrado.', 'danger')
+        return redirect(url_for('admin_panel'))
+
+    if user['id'] == session['user_id']:
+        flash('Voce nao pode alterar seu proprio nivel de admin.', 'warning')
+        return redirect(url_for('admin_panel'))
+
+    new_value = 0 if user['is_admin'] else 1
+    db.execute("UPDATE users SET is_admin = ? WHERE id = ?", (new_value, user_id))
+    db.commit()
+    status = 'administrador' if new_value else 'usuario comum'
+    flash(f"{user['username']} agora e {status}.", 'success')
+    return redirect(url_for('admin_panel'))
+
+
+@app.route('/admin/user/<int:user_id>/delete', methods=['POST'])
+@admin_required
+def admin_delete_user(user_id):
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        flash('Usuario nao encontrado.', 'danger')
+        return redirect(url_for('admin_panel'))
+
+    if user['id'] == session['user_id']:
+        flash('Voce nao pode excluir sua propria conta.', 'warning')
+        return redirect(url_for('admin_panel'))
+
+    # apaga dados do usuario
+    db.execute("DELETE FROM phase_answers WHERE session_id IN (SELECT id FROM game_sessions WHERE user_id = ?)", (user_id,))
+    db.execute("DELETE FROM game_sessions WHERE user_id = ?", (user_id,))
+    db.execute("DELETE FROM user_badges WHERE user_id = ?", (user_id,))
+    db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    db.commit()
+    flash(f"Usuario {user['username']} excluido com sucesso.", 'success')
+    return redirect(url_for('admin_panel'))
+
 
 @app.route('/reset-password', methods=['GET', 'POST'])
 def reset_password():
@@ -943,24 +1238,49 @@ def dashboard():
     # Calcular estatisticas
     total_games = len(sessions)
     completed_games = [s for s in sessions if s['completed']]
-    best_score = max((s['score'] for s in completed_games), default=0)
-    best_max = max((s['max_score'] for s in completed_games), default=30)
 
-    # Busca status de show_in_ranking do usuario
+    # max_max_score_global = max pontuavel POSSIVEL hoje (recalculado das GAME_PHASES,
+    # nao do banco). Isso garante que mesmo sessoes antigas com max_score=2100
+    # (gravadas antes da migracao pra base 1600) mostrem o teto atualizado.
+    max_score_possible = sum(
+        sum(1 for s in p['subphases'] if s.get('scorable', True))
+        for p in GAME_PHASES.values()
+    ) * 100
+
+    # best_score/max = o melhor jogo completed do usuario
+    if completed_games:
+        best_session = max(completed_games, key=lambda s: s['score'])
+        # Cap em 100%: se a sessao antiga tem pontos de subfases que foram removidas
+        # (score > teto novo), capamos o score no teto pra nao mostrar >100%.
+        # Tambem cap o max no teto novo (sessoes antigas gravadas com max=2100/1700).
+        best_score = min(best_session['score'], max_score_possible)
+        best_max = min(best_session['max_score'], max_score_possible)
+    else:
+        best_score = 0
+        best_max = max_score_possible
+
+    # Busca status de show_in_ranking e loja do usuario
     user_data = db.execute(
-        "SELECT show_in_ranking FROM users WHERE id = ?",
+        "SELECT show_in_ranking, loja FROM users WHERE id = ?",
         (session['user_id'],)
     ).fetchone()
     show_in_ranking = bool(user_data['show_in_ranking']) if user_data else True
 
-    # Ranking nacional (somente quem ativou a opcao)
+    # Ranking por loja: soma do melhor score dos usuarios de cada loja
     ranking = db.execute("""
-        SELECT u.username, MAX(gs.score) as best_score, MAX(gs.max_score) as max_score
-        FROM game_sessions gs
-        JOIN users u ON gs.user_id = u.id
-        WHERE gs.completed = 1 AND u.show_in_ranking = 1
-        GROUP BY u.id
-        ORDER BY best_score DESC
+        SELECT u.loja,
+               SUM(COALESCE(best.best_score, 0)) as total_score,
+               COUNT(DISTINCT u.id) as total_players
+        FROM users u
+        LEFT JOIN (
+            SELECT user_id, MAX(score) as best_score
+            FROM game_sessions
+            WHERE completed = 1
+            GROUP BY user_id
+        ) best ON best.user_id = u.id
+        WHERE u.show_in_ranking = 1 AND u.loja IS NOT NULL AND u.loja != ''
+        GROUP BY u.loja
+        ORDER BY total_score DESC
         LIMIT 10
     """).fetchall()
 
@@ -970,8 +1290,10 @@ def dashboard():
                          completed_count=len(completed_games),
                          best_score=best_score,
                          best_max=best_max,
+                         max_score_possible=max_score_possible,
                          show_in_ranking=show_in_ranking,
-                         ranking=ranking)
+                         ranking=ranking,
+                         user_loja=user_data['loja'] if user_data else None)
 
 @app.route('/toggle-ranking', methods=['POST'])
 @login_required
@@ -1026,11 +1348,16 @@ def personagem():
 @login_required
 def game_start():
     db = get_db()
-    # Pontuacao maxima dinamica: 10 pontos por questao
-    total_questions = sum(len(p['subphases']) for p in GAME_PHASES.values())
+    # Pontuacao maxima: 100 pts por subfase pontuavel.
+    # Subfases com "scorable": False (ex: builder educativo da Fase 1) nao contam.
+    # 17 subfases totais - 1 builder nao-pontuavel = 16 pontuaveis * 100 = 1600 max.
+    total_scorable = sum(
+        sum(1 for s in p['subphases'] if s.get('scorable', True))
+        for p in GAME_PHASES.values()
+    )
     cursor = db.execute(
         "INSERT INTO game_sessions (user_id, max_score) VALUES (?, ?)",
-        (session['user_id'], total_questions * 10)
+        (session['user_id'], total_scorable * 100)
     )
     db.commit()
     game_id = cursor.lastrowid
@@ -1067,12 +1394,13 @@ def game_play(game_id, phase, sub):
             return redirect(url_for('game_play', game_id=game_id, phase=next_phase, sub=1))
         else:
             # Jogo concluido!
-            db.execute(
-                "UPDATE game_sessions SET completed = 1, finished_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (game_id,)
-            )
-            db.commit()
-            return redirect(url_for('game_feedback', game_id=game_id))
+                db.execute(
+                    "UPDATE game_sessions SET completed = 1, finished_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (game_id,)
+                )
+                db.commit()
+                check_and_award_badges(session['user_id'])
+                return redirect(url_for('game_feedback', game_id=game_id))
 
     subphase_data = phase_data['subphases'][sub - 1]
 
@@ -1081,6 +1409,13 @@ def game_play(game_id, phase, sub):
         "SELECT * FROM phase_answers WHERE session_id = ? AND phase = ? AND subphase = ?",
         (game_id, phase, sub)
     ).fetchone()
+
+    # Lista de subphases da fase atual que ja foram respondidas (usada pelas bolinhas)
+    answered_subphases = db.execute(
+        "SELECT subphase FROM phase_answers WHERE session_id = ? AND phase = ?",
+        (game_id, phase)
+    ).fetchall()
+    answered_subs = {row['subphase'] for row in answered_subphases}
 
     # Email cadastrado pelo usuario (usado como destinatario na simulacao de e-mail)
     user_email = db.execute(
@@ -1098,6 +1433,7 @@ def game_play(game_id, phase, sub):
                          phase_data=phase_data,
                          subphase_data=subphase_data,
                          already_answered=already_answered,
+                         answered_subs=answered_subs,
                          user_email=user_email,
                          player_char=char_data,
                          total_phases=len(GAME_PHASES),
@@ -1116,48 +1452,80 @@ COMMON_PATTERNS = [
 ]
 
 def check_password_strength(password):
-    """Avalia a força de uma senha."""
+    """Avalia a força de uma senha.
+
+    max_score = 19 (maximo absoluto se todos os 9 criterios forem atingidos):
+      tam>=8: +2, tam>=12: +3, tam>=16: +2 (max +7)
+      lower/upper/num: +2 cada (+6)
+      simbolo: +3
+      sem padrao comum: +2
+      sem repeticao: +1
+    """
     if not password:
-        return {"score": 0, "max_score": 18, "strength": "vazia", "label": "Digite uma senha...", "color": "#888", "percent": 0, "time": "—", "feedback": [], "bonuses": [], "length": 0}
+        return {"score": 0, "max_score": 19, "strength": "vazia", "label": "Digite uma senha...", "color": "#888", "percent": 0, "time": "—", "feedback": [], "bonuses": [], "missing": [], "length": 0}
 
     score = 0
     feedback = []
     bonuses = []
+    missing = []   # criterios NAO atingidos, pra exibir "o que faltou"
     length = len(password)
 
+    # Tamanho — acumula TODOS os bonus atingidos (>=8, >=12, >=16) pra fechar max_score = 19
     if length >= 8:
         score += 2; feedback.append("✅ Pelo menos 8 caracteres")
     elif length >= 6:
         score += 1; feedback.append("⚠️ Senha curta — tente pelo menos 8 caracteres")
+        missing.append({"pts": 1, "reason": "atingir 8 caracteres (+1 pt)"})
     else:
         feedback.append("❌ Senha muito curta (mínimo 6 caracteres)")
+        missing.append({"pts": 2, "reason": "atingir 8 caracteres (+2 pts)"})
 
-    if length >= 12: score += 3; bonuses.append("🌟 12+ caracteres (+3)")
-    if length >= 16: score += 2; bonuses.append("🏆 16+ caracteres (+2)")
+    if length >= 12:
+        score += 3; bonuses.append("🌟 12+ caracteres (+3)")
+    else:
+        missing.append({"pts": 3, "reason": "atingir 12 caracteres (+3 pts)"})
 
+    if length >= 16:
+        score += 2; bonuses.append("🏆 16+ caracteres (+2)")
+    else:
+        missing.append({"pts": 2, "reason": "atingir 16 caracteres (+2 pts)"})
+
+    # Variedade de caracteres
     if re.search(r'[a-z]', password): score += 2; feedback.append("✅ Tem letras minúsculas")
-    else: feedback.append("❌ Falta letra minúscula")
+    else:
+        feedback.append("❌ Falta letra minúscula")
+        missing.append({"pts": 2, "reason": "letra minúscula (+2 pts)"})
     if re.search(r'[A-Z]', password): score += 2; feedback.append("✅ Tem letras maiúsculas")
-    else: feedback.append("❌ Falta letra maiúscula")
+    else:
+        feedback.append("❌ Falta letra maiúscula")
+        missing.append({"pts": 2, "reason": "letra maiúscula (+2 pts)"})
     if re.search(r'[0-9]', password): score += 2; feedback.append("✅ Tem números")
-    else: feedback.append("❌ Falta número")
+    else:
+        feedback.append("❌ Falta número")
+        missing.append({"pts": 2, "reason": "número (+2 pts)"})
     if re.search(r'[^a-zA-Z0-9]', password): score += 3; feedback.append("✅ Tem caracteres especiais")
-    else: feedback.append("❌ Falta caractere especial (!@#$%)")
+    else:
+        feedback.append("❌ Falta caractere especial (!@#$%)")
+        missing.append({"pts": 3, "reason": "caractere especial (+3 pts)"})
 
+    # Padrao comum
     pwd_lower = password.lower()
     has_pattern = any(re.search(pat, pwd_lower) for pat in COMMON_PATTERNS)
     if has_pattern:
         feedback.append("⚠️ Contém padrão comum (123, abc, qwerty...)")
+        missing.append({"pts": 2, "reason": "sem padrão comum como 123, abc, qwerty (+2 pts)"})
     else:
         score += 2; feedback.append("✅ Sem padrões óbvios")
 
+    # Repeticao em sequencia
     if re.search(r'(.)\1\1', password):
         score -= 2; feedback.append("⚠️ Caracteres repetidos em sequência (aaa, 111)")
+        missing.append({"pts": 1, "reason": "sem repetições em sequência como aaa, 111 (+1 pt)"})
     else:
         score += 1; feedback.append("✅ Sem repetições em sequência")
 
     score = max(0, score)
-    percent = int((score / 18) * 100)
+    percent = int((score / 19) * 100)  # max real e 19, nao 18
 
     if score <= 6: strength, label, color = "fraca", "❌ Fraca", "#FF6B6B"
     elif score <= 10: strength, label, color = "media", "⚠️ Média", "#FFC98A"
@@ -1171,14 +1539,17 @@ def check_password_strength(password):
     elif length < 16: time_str = "séculos"
     else: time_str = "mais que a idade do universo 🌌"
 
-    return {"score": score, "max_score": 18, "strength": strength, "label": label, "color": color, "percent": percent, "time": time_str, "feedback": feedback, "bonuses": bonuses, "length": length}
+    return {"score": score, "max_score": 19, "strength": strength, "label": label, "color": color, "percent": percent, "time": time_str, "feedback": feedback, "bonuses": bonuses, "missing": missing, "length": length}
 
 
 @app.route('/game/<int:game_id>/phase/1/sub/0/submit', methods=['POST'])
 @login_required
 def phase1_sub0_submit(game_id):
     """Mini drag-and-drop de aquecimento (sub 0 da Fase 1). 4 cards:
-    2 faceis + 2 dificeis. Avanca para a sub 1 (teclado virtual)."""
+    2 faceis + 2 dificeis. Avanca para a sub 1 (teclado virtual).
+
+    Pontuacao por acerto: 25 pts por cartao certo (4 acertos = 100 pts = fase cheia).
+    Mesma logica do DnD de 8 cartoes da sub 3, so que em escala 4."""
     db = get_db()
     game = db.execute(
         "SELECT * FROM game_sessions WHERE id = ? AND user_id = ? AND completed = 0",
@@ -1203,14 +1574,8 @@ def phase1_sub0_submit(game_id):
     if existing:
         return jsonify({"error": "Voce ja completou essa fase"}), 400
 
-    # Pontuacao: 4 cards, escala igual a sub 2 (>=100: 10pts, >=60: 7pts, ...)
-    # Como o score maximo possivel aqui e 4 acertos * 10 = 40, mantemos a
-    # mesma logica mas com piso mais alto para reconhecer o aquecimento.
-    if correct >= 4: points = 7        # gabaritou
-    elif correct >= 3: points = 5
-    elif correct >= 2: points = 3
-    else: points = 1
-
+    # Pontuacao: 25 pts por acerto (4 acertos = 100 = fase cheia)
+    points = correct * 25
     is_strong = correct >= 3
 
     db.execute(
@@ -1240,7 +1605,13 @@ def phase1_sub0_submit(game_id):
 @app.route('/game/<int:game_id>/phase/1/submit', methods=['POST'])
 @login_required
 def phase1_submit(game_id):
-    """Teclado virtual (sub 2). Avança para a sub 3 (drag and drop)."""
+    """Teclado virtual (sub 2). Avanca para a sub 3 (drag and drop).
+
+    O usuario pode refazer quantas vezes quiser: cada re-submit deleta a
+    resposta anterior, reverte os pontos que tinham sido somados e
+    recalcula tudo com base na nova senha. Isso incentiva o usuario a
+    sempre tentar uma senha mais forte (se ele re-submeter uma fraca,
+    perde os 10 pts anteriores)."""
     db = get_db()
     game = db.execute(
         "SELECT * FROM game_sessions WHERE id = ? AND user_id = ? AND completed = 0",
@@ -1252,12 +1623,22 @@ def phase1_submit(game_id):
     password = request.form.get('password', '')
     result = check_password_strength(password)
 
+    # Resubmit permitido: se ja existe resposta, deleta e reverte os pontos antigos
     existing = db.execute(
         "SELECT * FROM phase_answers WHERE session_id = ? AND phase = 1 AND subphase = 2",
         (game_id,)
     ).fetchone()
     if existing:
-        return jsonify({"error": "Voce ja completou essa fase"}), 400
+        # Reverte os pontos que tinham sido creditados (100 pts se passou no submit)
+        if existing['correct']:
+            db.execute(
+                "UPDATE game_sessions SET score = MAX(0, score - 100) WHERE id = ?",
+                (game_id,)
+            )
+        db.execute(
+            "DELETE FROM phase_answers WHERE session_id = ? AND phase = 1 AND subphase = 2",
+            (game_id,)
+        )
 
     is_strong = all([
         len(password) >= 10,
@@ -1266,7 +1647,7 @@ def phase1_submit(game_id):
         re.search(r'[0-9]', password),
         re.search(r'[^a-zA-Z0-9]', password),
     ])
-    points = 10 if is_strong else 0
+    points = 100 if is_strong else 0
 
     db.execute(
         "INSERT INTO phase_answers (session_id, phase, subphase, correct) VALUES (?, 1, 2, ?)",
@@ -1288,7 +1669,8 @@ def phase1_submit(game_id):
         "strength": result['strength'], "label": result['label'],
         "color": result['color'], "percent": result['percent'],
         "time": result['time'], "feedback": result['feedback'],
-        "bonuses": result['bonuses'], "next_url": next_url
+        "bonuses": result['bonuses'], "missing": result['missing'],
+        "next_url": next_url
     })
 
 
@@ -1324,15 +1706,11 @@ def phase1_sub2_submit(game_id):
     if existing:
         return jsonify({"error": "Voce ja completou essa fase"}), 400
 
-    # Pontos baseados em performance
-    # 0 vidas = 0pts, 1 vida = 3pts, 2 vidas = 7pts, 3 vidas = 10pts
-    # Bonus: cada acerto extra alem de 5 = +1pt
-    if score >= 100: points = 10
-    elif score >= 60: points = 7
-    elif score >= 30: points = 5
-    else: points = 2
-
-    is_strong = points >= 7
+    # Pontuacao: 100 pts por fase, dividido pelos 8 cartoes (12.5 pts por acerto).
+    # 8 acertos = 100 (gabarito); 4 acertos = 50 (metade); 1 acerto = 12.
+    # Mantem a escala continua pra nao punir quem errou 1-2 cartoes.
+    points = round(correct * 100 / 8)
+    is_strong = correct >= 6
 
     db.execute(
         "INSERT INTO phase_answers (session_id, phase, subphase, correct) VALUES (?, 1, 3, ?)",
@@ -1392,6 +1770,27 @@ def phase1_sub3_save_data(game_id):
             "missing": missing
         }), 400
 
+    # Validacao de formato: pet/team/city/mother = letras (com acento) e espacos;
+    # dob = apenas digitos. Defesa em profundidade alem do filtro JS do frontend.
+    ALPHA_PATTERN = re.compile(r'^[A-Za-zÀ-ÿ\s]+$')
+    DIGIT_PATTERN = re.compile(r'^[0-9]+$')
+    invalid_format = []
+    if not ALPHA_PATTERN.match(str(raw['pet'])):
+        invalid_format.append('pet')
+    if not DIGIT_PATTERN.match(str(raw['dob'])):
+        invalid_format.append('dob')
+    if not ALPHA_PATTERN.match(str(raw['team'])):
+        invalid_format.append('team')
+    if not ALPHA_PATTERN.match(str(raw['city'])):
+        invalid_format.append('city')
+    if not ALPHA_PATTERN.match(str(raw['mother'])):
+        invalid_format.append('mother')
+    if invalid_format:
+        return jsonify({
+            "error": "Verifique o formato dos campos: nome/texto aceita apenas letras, data aceita apenas numeros.",
+            "invalid_format": invalid_format
+        }), 400
+
     # Salva os 5 campos na sessao (so pra esse usuario + esse game)
     session[f'p1s3_personal_{game_id}'] = {
         'pet':    str(raw['pet']).strip()[:40],
@@ -1411,18 +1810,32 @@ def phase1_sub3_save_data(game_id):
     city = d['city'] or 'cidade'
     mother = d['mother'] or 'mae'
 
-    # Extrai o ano da data (4 ultimos digitos, ou usa tudo se nao for data)
-    year = dob[-4:] if len(dob) >= 4 and dob[-4:].isdigit() else '1990'
-    # Pega a primeira letra do pet
+    # Extrai o ano (4 ultimos digitos) e o dia+mes (do meio) da data.
+    # Ex: "29122006" -> day_month="2912", year="2006"
+    digits_only = ''.join(c for c in dob if c.isdigit())
+    year = digits_only[-4:] if len(digits_only) >= 4 and digits_only[-4:].isdigit() else '1990'
+    day_month = digits_only[:4] if len(digits_only) >= 4 else '0101'
+    # Pega a primeira letra do pet e do time (variação "inicial + algo")
     pet_initial = pet[0].lower() if pet else 'p'
     team_initial = team[0].lower() if team else 't'
+    # Time sem espacos e em minusculo pra combinacoes tipo "santos2912"
+    team_compact = team.lower().replace(' ', '') if team else 'time'
+    # Mae sem espacos e em minusculo pra combinacoes tipo "jane29122006"
+    mother_compact = mother.lower().replace(' ', '') if mother else 'mae'
 
     weak_passwords = [
-        (f'{pet_initial}123',       f'pet + sequencia numerica (seu pet e {pet})'),
-        (f'{team_initial}2024',     f'time + ano (seu time e {team})'),
-        (mother.lower(),            f'nome da mae (sua mae e {mother})'),
-        (f'{city}{year}',           f'cidade + ano de nascimento (voce nasceu em {city} em {year})'),
-        (f'{pet}{year}',            f'pet + ano (combinacao classica)'),
+        # 1) inicial do pet + ano de nascimento
+        (f'{pet_initial}{year}',         f'inicial do pet + ano (ex: nome do pet comecando com a letra e ano de nascimento)'),
+        # 2) inicial do time + ano de nascimento
+        (f'{team_initial}{year}',        f'inicial do time + ano (ex: time do coracao comecando pela letra e ano de nascimento)'),
+        # 3) nome da mae + data completa
+        (f'{mother_compact}{digits_only}', f'nome da mae + data completa (mae e data inteira sao uma combinacao classica)'),
+        # 4) cidade + ano
+        (f'{city}{year}',                f'cidade + ano (ex: local de nascimento seguido do ano)'),
+        # 5) pet + ano (classica)
+        (f'{pet}{year}',                 f'pet + ano (a combinacao mais obvia: nome do animal + ano de nascimento)'),
+        # 6) time + dia/mes
+        (f'{team_compact}{day_month}',   f'time + dia/mes de nascimento (time do coracao + aniversario no formato DDMM)'),
     ]
 
     return jsonify({
@@ -1509,7 +1922,7 @@ def game_answer(game_id):
         return jsonify({"error": "Voce ja respondeu essa pergunta"}), 400
 
     correct = (answer == subphase_data['correct'])
-    points = 10 if correct else 0
+    points = 100 if correct else 0
 
     db.execute(
         "INSERT INTO phase_answers (session_id, phase, subphase, correct) VALUES (?, ?, ?, ?)",
@@ -1539,11 +1952,12 @@ def game_answer(game_id):
             (game_id,)
         )
         db.commit()
+        check_and_award_badges(session['user_id'])
 
     if phase_data.get('classify'):
-        explanation_title = "Classificação correta! +10 pontos" if correct else "Classificação incorreta... 0 pontos"
+        explanation_title = "Classificação correta! +100 pontos" if correct else "Classificação incorreta... 0 pontos"
     else:
-        explanation_title = "Acertou! +10 pontos" if correct else "Que pena... 0 pontos"
+        explanation_title = "Acertou! +100 pontos" if correct else "Que pena... 0 pontos"
 
     return jsonify({
         "correct": correct,
@@ -1622,6 +2036,7 @@ def game_hacked(game_id):
             "UPDATE game_sessions SET completed = 1, finished_at = CURRENT_TIMESTAMP WHERE id = ?",
             (game_id,)
         )
+        check_and_award_badges(session['user_id'])
     db.commit()
 
     return jsonify({
@@ -1631,24 +2046,6 @@ def game_hacked(game_id):
         "is_final": is_final,
         "next_url": url_for('game_feedback', game_id=game_id) if is_final
                    else url_for('game_play', game_id=game_id, phase=next_phase, sub=next_sub)
-    })
-
-@app.route('/game/<int:game_id>/check-progress')
-@login_required
-def game_check_progress(game_id):
-    """Endpoint mantido por compatibilidade. Como o resultado final agora
-    esta sempre liberado, sempre responde ok=true."""
-    db = get_db()
-    game = db.execute(
-        "SELECT * FROM game_sessions WHERE id = ? AND user_id = ?",
-        (game_id, session['user_id'])
-    ).fetchone()
-    if not game:
-        return jsonify({"ok": False, "error": "Sessao nao encontrada."}), 404
-    return jsonify({
-        "ok": True,
-        "missing": 0,
-        "next_url": url_for('game_feedback', game_id=game_id)
     })
 
 
@@ -1671,7 +2068,15 @@ def game_feedback(game_id):
     ).fetchall()
 
     score = game['score']
-    max_score = game['max_score']
+    # Cap em 100%: se a sessao antiga tem pontos de subfases que foram removidas
+    # (score > teto novo), capamos o score no teto pra nao mostrar >100%.
+    # Tambem cap o max no teto novo (sessoes antigas gravadas com max=2100/1700).
+    max_score_possible = sum(
+        sum(1 for s in p['subphases'] if s.get('scorable', True))
+        for p in GAME_PHASES.values()
+    ) * 100
+    score = min(game['score'], max_score_possible)
+    max_score = min(game['max_score'], max_score_possible)
     percentage = (score / max_score * 100) if max_score > 0 else 0
 
     # Gerar feedback personalizado
