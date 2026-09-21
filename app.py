@@ -1045,8 +1045,9 @@ def badges():
     return render_template('badges.html', badges=BADGES, user_badges=user_badges)
 
 @app.route('/desafios')
+@app.route('/cursos')
 @login_required
-def desafios():
+def cursos():
     modulos = [
         {
             'titulo': 'Modulo 1 - X',
@@ -1078,7 +1079,7 @@ def desafios():
             ]
         },
     ]
-    return render_template('desafios.html', modulos=modulos)
+    return render_template('cursos.html', modulos=modulos)
 
 
 @app.route('/admin')
