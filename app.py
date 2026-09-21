@@ -1050,32 +1050,21 @@ def badges():
 def cursos():
     modulos = [
         {
-            'titulo': 'Modulo 1 - X',
+            'titulo': 'Módulo 1 - Engenharia Social e Phishing',
             'atividades': [
-                {'titulo': 'Curso X', 'url': '#'},
-                {'titulo': 'Desafio: X', 'url': '#'},
+                {'titulo': 'Fazer download do curso', 'url': url_for('static', filename='pdfs/modulo1_engenharia_social_e_phishing.pdf'), 'download': True}
             ]
         },
         {
-            'titulo': 'Modulo 2 - Phishing e Engenharia Social',
+            'titulo': 'Módulo 2 - Senhas e Segurança dos Dispositivos',
             'atividades': [
-                {'titulo': 'Curso X', 'url': '#'},
-                {'titulo': 'Desafio: X', 'url': '#'},
+                {'titulo': 'Fazer download do curso', 'url': url_for('static', filename='pdfs/modulo2_senhas_e_seguranca_dos_dispositivos.pdf'), 'download': True}
             ]
         },
         {
-            'titulo': 'Modulo 3 - Logs e Monitoramento',
+            'titulo': 'Módulo 3 - Negligência e Uso Seguro da IA',
             'atividades': [
-                {'titulo': 'Curso X', 'url': '#'},
-                {'titulo': 'Desafio: X', 'url': '#'},
-            ]
-        },
-        {
-            'titulo': 'Modulo 4 - Resposta a Incidentes',
-            'atividades': [
-                {'titulo': 'Ciclo de resposta a incidentes', 'url': '#'},
-                {'titulo': 'Case: Ransomware na loja', 'url': '#'},
-                {'titulo': 'Simulacao: Contencao do ataque', 'url': '#'},
+                {'titulo': 'Fazer download do curso', 'url': url_for('static', filename='pdfs/modulo3_negligencia_e_uso_seguro_da_ia.pdf'), 'download': True}
             ]
         },
     ]

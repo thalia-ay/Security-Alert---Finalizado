@@ -136,8 +136,8 @@
                 <ul class="atividades-list">
                     {% for atividade in modulo.atividades %}
                     <li class="atividade-item">
-                        <span class="atividade-bullet">🔧</span>
-                        <a href="{{ atividade.url }}" class="atividade-link">{{ atividade.titulo }}</a>
+                        <span class="atividade-bullet">📥</span>
+                        <a href="{{ atividade.url }}" class="atividade-link" {% if atividade.download %}download{% endif %}>{{ atividade.titulo }}</a>
                     </li>
                     {% endfor %}
                 </ul>
